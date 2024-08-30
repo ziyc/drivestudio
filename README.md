@@ -169,7 +169,7 @@ We extend our deepest gratitude to the authors for their contributions to the co
 ```
 @article{chen2024omnire,
     title={OmniRe: Omni Urban Scene Reconstruction},
-    author = {Chen, Ziyu and Yang, Jiawei and Huang, Jiahui and Lutio, Riccardo de and Esturo, Janick Martinez and Ivanovic, Boris and Litany, Or and Gojcic, Zan and Fidler, Sanja and Pavone, Marco and Song, Li and Wang, Yue},
+    author={Chen, Ziyu and Yang, Jiawei and Huang, Jiahui and Lutio, Riccardo de and Esturo, Janick Martinez and Ivanovic, Boris and Litany, Or and Gojcic, Zan and Fidler, Sanja and Pavone, Marco and Song, Li and Wang, Yue},
     journal={arXiv preprint arXiv:2408.16760},
     year={2024}
 }
