@@ -6,7 +6,7 @@
   </picture>
 </p>
 <p align="center">
-A 3DGS framework for omini urban scene reconstruction and simulation!
+A 3DGS framework for omni urban scene reconstruction and simulation!
 </p>
 
 <p align="center">
