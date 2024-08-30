@@ -146,6 +146,7 @@ python tools/train.py \
 - To run other methods, change `--config_file`. See `configs/` for more options.
 - Specify dataset and number of cameras by setting `dataset`. Examples: `waymo/1cams`, `waymo/5cams`, `pandaset/6cams`, `argoverse/7cams`, etc.
   You can set up arbitrary camera combinations for each dataset. See `configs/datasets/` for custom configuration details.
+- For over 3 cameras or 450+ images, we recommend using `omnire_extended_cam.yaml`. It works better in practice.
 ### Evaluation
 ```shell
 python tools/eval.py --resume_from $ckpt_path
