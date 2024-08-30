@@ -1,0 +1,44 @@
+# PyTorch and related libraries
+--extra-index-url https://download.pytorch.org/whl/cu117
+torch==2.0.0+cu117
+torchvision==0.15.0+cu117
+xformers==0.0.18
+timm==0.9.5
+pytorch_msssim
+
+# Configuration and metrics
+omegaconf==2.3.0
+torchmetrics==0.10.3
+
+# Visualization and logging
+tensorboard==2.11.0
+wandb==0.15.8
+matplotlib==3.6.1
+plotly==5.13.1
+viser
+
+# Image and video processing
+imageio
+imageio-ffmpeg
+scikit-image==0.20.0
+opencv-python
+
+# 3D libraries
+vedo
+open3d
+pyquaternion
+chumpy
+kornia
+
+# Machine learning utilities
+tqdm
+ninja
+gdown
+
+# Gaussian splatting related
+gsplat
+nerfview
+lpips
+
+# Development tools
+black==22.6.0

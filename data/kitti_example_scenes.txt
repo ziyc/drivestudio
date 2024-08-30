@@ -1,0 +1,5 @@
+# scene_id, start_timestep, end_timestep
+2011_09_26_drive_0001_sync,0,-1
+2011_09_26_drive_0018_sync,0,200
+2011_09_26_drive_0091_sync,0,200
+2011_09_26_drive_0059_sync,0,200

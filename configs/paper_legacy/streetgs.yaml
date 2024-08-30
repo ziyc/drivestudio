@@ -1,0 +1,139 @@
+seed: 0
+dataset: waymo/3cams
+
+# ------------- Trainer ------------ #
+trainer:
+  type: models.trainers.MultiTrainer
+  optim:
+    num_iters: 30000
+    use_grad_scaler: false
+    cache_buffer_freq: -1
+  render:
+    near_plane: 0.1
+    far_plane: 10000000000.0
+    antialiased: false
+    packed: false
+    absgrad: true
+    sparse_grad: false
+    batch_size: 1
+  losses:
+    rgb:
+      w: 0.8
+    ssim:
+      w: 0.2
+    mask:
+      w: 0.05
+      opacity_loss_type: bce # choose from [bce, safe_bce]
+    depth:
+      w: 0.1 # weight of depth loss
+      inverse_depth: True # whether to use inverse depth, NOTE that when set to True, must normalize=True
+      normalize: False # whether to normalize depth loss
+      loss_type: l1 # choose from ["l1", "l2"]
+    opacity_entropy:
+      w: 0.05
+    inverse_depth_smoothness:
+      w: 0.001
+    dynamic_region:
+      factor: 5
+      start_from: 20000
+  res_schedule:
+    double_steps: 250 # training starts at 1/d resolution, every n steps this is doubled
+    downscale_times: 2 # at the beginning, resolution is 1/2^d, where d is this number
+  gaussian_optim_general_cfg:
+    xyz:
+      lr: 1.6e-04
+      lr_final: 1.6e-06
+      scale_factor: scene_radius # str or float, if "scene_scale", scale the learning rate by the scene scale
+    sh_dc:
+      lr: 0.0025
+    sh_rest:
+      lr: 0.000125
+    opacity:
+      lr: 0.05
+    scaling:
+      lr: 0.005
+    rotation:
+      lr: 0.001
+  gaussian_ctrl_general_cfg:
+    warmup_steps: 500             # warmup steps for alpha
+    reset_alpha_interval: 3000    # reset alpha every n steps
+    refine_interval: 100          # refine gaussians every n steps
+    sh_degree_interval: 1000      # every n intervals turn on another sh degree
+    n_split_samples: 2            # number of samples to split gaussians into
+    # may differ in different models
+    reset_alpha_value: 0.01       # reset alpha to this value
+    densify_grad_thresh: 0.0003   # above this grad, gaussians are densified
+    densify_size_thresh: 0.003   # below this size, gaussians are *duplicated*, otherwise split
+    cull_alpha_thresh: 0.005       # threshold of opacity for culling gaussians
+    cull_scale_thresh: 0.5        # threshold of scale for culling gaussians
+    cull_screen_size: 0.15        # if a gaussian is more than this percent of screen space, cull it
+    split_screen_size: 0.05       # if a gaussian is more than this percent of screen space, split it
+    stop_screen_size_at: 4000     # stop culling/splitting at this step WRT screen size of gaussians
+    stop_split_at: 15000          # stop splitting at this step
+    sh_degree: 3                  # sh degree for gaussians
+
+# ------------- Model ------------ #
+model:
+  Background:
+    type: models.gaussians.VanillaGaussians
+    init:
+      from_lidar:
+        num_samples: 600_000
+        return_color: True
+      near_randoms: 200_000
+      far_randoms: 200_000
+    reg:
+      sharp_shape_reg:
+        w: 1.
+        step_interval: 10
+        max_gauss_ratio: 10.       # threshold of ratio of gaussian max to min scale before applying regularization loss from the PhysGaussian paper
+  RigidNodes:
+    type: models.nodes.RigidNodes
+    init:
+      instance_max_pts: 5000
+      only_moving: true
+      traj_length_thres: 1.0
+    ctrl:
+      cull_scale_thresh: 0.1
+      stop_screen_size_at: 30000
+      stop_split_at: 20000
+      cull_out_of_bound: true
+    reg:
+      sharp_shape_reg:
+        w: 1.
+        step_interval: 10
+        max_gauss_ratio: 10.
+      temporal_smooth_reg:
+        trans:
+          w: 0.01 # no ablation, maybe some other values will be better
+          smooth_range: 5 # no ablation
+    optim:
+      ins_rotation:
+        lr: 0.00001
+        lr_final: 0.000005
+      ins_translation:
+        lr: 0.0005
+        lr_final: 0.0001
+  Sky:
+    type: models.modules.EnvLight
+    params:
+      resolution: 1024
+    optim:
+      all:
+        lr: 0.01
+
+# ------------- render ------------ #
+render:
+  fps: 16 # frames per second for the main rendered output
+  render_full: True # whether to render full resolution videos
+  render_test: True # whether to render test set
+  vis_lidar: False # whether to visualize lidar points on ground truth images
+  vis_sky: False # whether to include "rgb_sky" and "rgb_sky_blend" in rendered keys
+  vis_error: False # whether to include "rgb_error_map" in rendered keys
+
+# ------------- logging ------------ #
+logging:
+  vis_freq: 2000 # how often to visualize training stats
+  print_freq: 500 # how often to print training stats
+  saveckpt_freq: 15000 # how often to save checkpoints
+  save_seperate_video: True # whether to save seperate videos for each scene

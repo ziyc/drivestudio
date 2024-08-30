@@ -1,0 +1,42 @@
+# Pandaset dataset configuration
+# Processed cameras:
+#   idx    camera           original size
+#    0    front_camera       (1920, 1080)
+#    1    front_left_camera  (1920, 1080)
+#    2    front_right_camera (1920, 1080)
+#    3    left_camera        (1920, 1080)
+#    4    right_camera       (1920, 1080)
+#    5    back_camera        (1920, 1080)
+
+data:
+  data_root: data/pandaset/processed # data root for the dataset
+  dataset: pandaset # dataset type
+  scene_idx: 0 # which scene to use
+  start_timestep: 0 # which timestep to start from
+  end_timestep: -1 # which timestep to end at, -1 means the last timestep
+  preload_device: cpu # choose from ["cpu", "cuda"], cache the data on this device
+  pixel_source: # image source and object annotations
+    type: datasets.pandaset.pandaset_sourceloader.PandaPixelSource
+    cameras: [0, 1, 2, 3, 4, 5] # which cameras to use
+    downscale_when_loading: [2, 2, 2, 2, 2, 2] # the size of the images to load
+    downscale: 1 # downscale factor wrt to the downscale_when_loading
+    undistort: False # whether to undistort the images
+    test_image_stride: 0 # use every Nth timestep for the test set. if 0, use all images for training and none for testing
+    load_sky_mask: True # whether to load sky mask
+    load_dynamic_mask: True # whether to load dynamic mask
+    load_objects: True # whether to load object bounding boxes
+    load_smpl: True # whether to load SMPL template for pedestrians
+    sampler: # error based image sampler
+      buffer_downscale: 8 # downscale factor for the buffer wrt load_size
+      buffer_ratio: 0.5 # the percentage of images sampled according to the error buffer
+      start_enhance_weight: 3 # give more chance to sample starting frames, which usually have more errors
+  lidar_source: # everything related to "lidar" --- from lidar points
+    type: datasets.pandaset.pandaset_sourceloader.PandaLiDARSource
+    load_lidar: True # whether to load lidar
+    only_use_360_lidar: False # whether to only use the 360-degree lidar
+    # ---- compute aabb from lidar ---- #
+    # if load_lidar is True, we compute aabb from lidar, otherwise we compute aabb from cameras
+    # 1) downsample lidar by random sampling to 1/lidar_downsample_factor number of points
+    # 2) compute aabb from the downsampled lidar points by using the percentile of lidar_percentiles 
+    lidar_downsample_factor: 4 # downsample lidar by this factor to compute percentile
+    lidar_percentile: 0.02  # percentile to compute aabb from lidar
