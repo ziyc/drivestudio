@@ -29,7 +29,7 @@ DriveStudio is a 3DGS codebase for urban scene reconstruction/simulation. It off
 This codebase also contains the **official implementation** of:
   > **OmniRe: Omni Urban Scene Reconstruction** <br> [Project Page](https://ziyc.github.io/omnire/) | [Paper](https://arxiv.org/abs/2408.16760) <br> [Ziyu Chen](https://ziyu-chen.github.io/), [Jiawei Yang](https://jiawei-yang.github.io/), [Jiahui Huang](https://huangjh-pub.github.io/), [Riccardo de Lutio](https://riccardodelutio.github.io/), [Janick Martinez Esturo](https://www.jme.pub/), [Boris Ivanovic](https://www.borisivanovic.com/), [Or Litany](https://orlitany.github.io/), [Zan Gojcic](https://zgojcic.github.io/), [Sanja Fidler](https://www.cs.utoronto.ca/~fidler/), [Marco Pavone](https://stanford.edu/~pavone/), [Li Song](https://medialab.sjtu.edu.cn/author/li-song/), [Yue Wang](https://yuewang.xyz/)
 
-## 🌟 Features
+# 🎉 Try your own projects/research on DriveStudio!
 ### 🔥 Highlighted implementations
 
 Our codebase supports two types of Gaussian trainers:
