@@ -131,6 +131,8 @@ We support most popular public driving datasets. Detailed instructions for downl
 ### Training
 ```shell
 export PYTHONPATH=$(pwd)
+start_timestep=0 # start frame index for training
+end_timestep=-1 # end frame index, -1 for the last frame
 
 python tools/train.py \
     --config_file configs/omnire.yaml \
@@ -139,8 +141,8 @@ python tools/train.py \
     --run_name $expname \
     dataset=waymo/3cams \
     data.scene_idx=$scene_idx \
-    data.start_timestep=$start_timestep \  # start frame index for training
-    data.end_timestep=$end_timestep  # end frame index, -1 for the last frame
+    data.start_timestep=$start_timestep \
+    data.end_timestep=$end_timestep
 ```
 
 - To run other methods, change `--config_file`. See `configs/` for more options.
