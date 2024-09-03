@@ -361,9 +361,9 @@ if __name__ == "__main__":
     
     # wandb logging part
     parser.add_argument("--enable_wandb", action="store_true", help="enable wandb logging")
-    parser.add_argument("--entity", default="ziyu-sjtu", type=str, help="wandb entity name")
-    parser.add_argument("--project", default="UrbanGSim", type=str, help="wandb project name, also used to enhance log_dir")
-    parser.add_argument("--run_name", default="debug", type=str, help="wandb run name, also used to enhance log_dir")
+    parser.add_argument("--entity", default="ziyc", type=str, help="wandb entity name")
+    parser.add_argument("--project", default="drivestudio", type=str, help="wandb project name, also used to enhance log_dir")
+    parser.add_argument("--run_name", default="omnire", type=str, help="wandb run name, also used to enhance log_dir")
     
     # viewer
     parser.add_argument("--enable_viewer", action="store_true", help="enable viewer")
