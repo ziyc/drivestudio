@@ -36,6 +36,19 @@ python datasets/waymo/waymo_download.py \
 
 If you wish to run experiments on different scenes, please specify your own list of scenes.
 
+<details>
+<summary>If this script doesn't work due to network issues, also consider manual download:</summary>
+
+Download the [scene flow version](https://console.cloud.google.com/storage/browser/waymo_open_dataset_scene_flow;tab=objects?prefix=&forceOnObjectsSortingFiltering=false) of Waymo.
+
+![Waymo Dataset Download Page](https://github.com/user-attachments/assets/a1737699-e792-4fa0-bb68-0ab1813f1088)
+
+> **Note**: Ensure you're downloading the scene flow version to avoid errors.
+
+</details>
+
+</details>
+
 ## 3. Preprocess the data
 After downloading the raw dataset, you'll need to preprocess this compressed data to extract and organize various components.
 
