@@ -1,9 +1,9 @@
 seed: 0
-dataset: waymo/3cams
+dataset: waymo/5cams
 
 # ------------- Trainer ------------ #
 trainer:
-  type: models.trainers.MultiTrainer
+  type: models.trainers.SingleTrainer
   optim:
     num_iters: 30000
     use_grad_scaler: false
@@ -13,7 +13,7 @@ trainer:
     far_plane: 10000000000.0 # far plane for rendering
     antialiased: false # whether to use antialiasing for gaussian rendering, supported by gsplat kernel
     packed: false # whether to use packed rendering, supported by gsplat kernel
-    absgrad: true # whether to use absolute gradient for rendering, supported by gsplat kernel
+    absgrad: false # whether to use absolute gradient for rendering, supported by gsplat kernel
     sparse_grad: false # whether to use sparse gradient for rendering, supported by gsplat kernel
     batch_size: 1 # batch size for rendering, currently only support 1
   losses:
@@ -22,18 +22,33 @@ trainer:
     ssim:
       w: 0.2
     mask:
-      w: 0.05
+      w: 1.0
       opacity_loss_type: bce # choose from [bce, safe_bce]
+      # bce: 二进制交叉熵（Binary Cross-Entropy)
+      # safe bce: 通过使用 clamp_min_ 和条件裁剪，此实现旨在提高数值稳定性，特别是当 x 接近 0 或 1 时，直接的 log(x) 或 log(1 - x) 可能导致数值问题。继承自pytorch的自动微分函数，计算成本大幅提高
     depth:
-      w: 0.01 # weight of depth loss
+      w: 0.1 # weight of depth loss
       inverse_depth: False # whether to use inverse depth, NOTE that when set to True, must normalize=True
+      # 针对深度图的平滑性损失计算，使用了kornia.losses.inverse_depth_smoothness_loss
       normalize: False # whether to normalize depth loss
       loss_type: l1 # choose from ["l1", "l2"]
-    affine:
-      w: 0.00001 # weight of affine regularization
+      # reduction: mean_on_hw # choose from ["mean_on_hit", "mean_on_hw", "sum", "none"]
+      # refer to pvg codebase
+      # 根据不同的规约选项对损失（loss）进行处理。它支持多种数据类型和规约方法，可以使用可选的掩码（mask）来加权或选择性地应用规约操作。
+      # mean: 如果没有掩码，直接返回所有元素的平均值；如果有掩码，返回加权的平均值（损失与掩码的元素乘积的平均值）。
+      # mean_in_mask: 只在掩码指定的位置计算平均值，实际上是计算掩码内的加权和除以掩码值的和（确保分母不为零，避免除零错误）。
+      # sum: 类似于平均值，但返回的是总和。
+      # max/min: 返回损失中的最大值或最小值。如果有掩码，只在掩码非零的位置考虑损失值。
+      # none: 返回原始损失，如果有掩码，返回损失与掩码的乘积。
+      # weight_decay: 1.0
+      # 调整L2对损失的贡献
+    # opacity_entropy:
+    #   w: 0.05
+    # inverse_depth_smoothness:
+    #   w: 0.001
   res_schedule:
-    double_steps: 250 # training starts at 1/d resolution, every n steps this is doubled
-    downscale_times: 2 # at the beginning, resolution is 1/2^d, where d is this number
+    double_steps: 3000 # training starts at 1/d resolution, every n steps this is doubled
+    downscale_times: 3 # at the beginning, resolution is 1/2^d, where d is this number
   gaussian_optim_general_cfg:
     xyz:
       lr: 1.6e-04
@@ -44,7 +59,7 @@ trainer:
     sh_rest:
       lr: 0.000125
     opacity:
-      lr: 0.05
+      lr: 0.005
     scaling:
       lr: 0.005
     rotation:
@@ -53,18 +68,18 @@ trainer:
     warmup_steps: 500             # warmup steps for alpha
     reset_alpha_interval: 3000    # reset alpha every n steps
     refine_interval: 100          # refine gaussians every n steps
-    sh_degree_interval: 1000      # every n intervals turn on another sh degree
+    sh_degree_interval: 2000      # every n intervals turn on another sh degree
     n_split_samples: 2            # number of samples to split gaussians into
     # may differ in different models
     reset_alpha_value: 0.01       # reset alpha to this value
-    densify_grad_thresh: 0.0005   # above this grad, gaussians are densified
-    densify_size_thresh: 0.003    # below this size, gaussians are *duplicated*, otherwise split
-    cull_alpha_thresh: 0.005      # threshold of opacity for culling gaussians
+    densify_grad_thresh: 0.0002   # above this grad, gaussians are densified
+    densify_size_thresh: 0.01   # below this size, gaussians are *duplicated*, otherwise split
+    cull_alpha_thresh: 0.005       # threshold of opacity for culling gaussians
     cull_scale_thresh: 0.5        # threshold of scale for culling gaussians
     cull_screen_size: 0.15        # if a gaussian is more than this percent of screen space, cull it
     split_screen_size: 0.05       # if a gaussian is more than this percent of screen space, split it
     stop_screen_size_at: 4000     # stop culling/splitting at this step WRT screen size of gaussians
-    stop_split_at: 15000          # stop splitting at this step
+    stop_split_at: 20000          # stop splitting at this step
     sh_degree: 3                  # sh degree for gaussians
 
 # ------------- Model ------------ #
@@ -82,157 +97,18 @@ model:
         w: 1.
         step_interval: 10
         max_gauss_ratio: 10.       # threshold of ratio of gaussian max to min scale before applying regularization loss from the PhysGaussian paper
-  RigidNodes:
-    type: models.nodes.RigidNodes
-    init:
-      instance_max_pts: 5000 # max initial points for each instance
-      only_moving: true # only optimize moving instances
-      traj_length_thres: 1.0 # threshold of trajectory length for moving instances
-    ctrl:
-      cull_scale_thresh: 0.1
-      stop_screen_size_at: 30000
-      stop_split_at: 20000
-      cull_out_of_bound: true
-    reg:
-      sharp_shape_reg:
-        w: 1.
-        step_interval: 10
-        max_gauss_ratio: 10.
-      temporal_smooth_reg:
-        trans:
-          w: 0.01 # optimal value may vary
-          smooth_range: 5 # no ablation
-    optim:
-      ins_rotation:
-        lr: 0.00001
-        lr_final: 0.000005
-      ins_translation:
-        lr: 0.0005
-        lr_final: 0.0001
-  DeformableNodes:
-    type: models.nodes.DeformableNodes
-    init:
-      instance_max_pts: 5000
-      only_moving: true
-      traj_length_thres: 0.5
-    networks:
-      D: 8
-      W: 256
-      embed_dim: 16
-      x_multires: 10                # default 10
-      t_multires: 10                # default 10
-      deform_quat: True
-      deform_scale: False
-    ctrl:
-      reset_alpha_value: 0.1
-      cull_scale_thresh: 0.1
-      stop_screen_size_at: 30000
-      stop_split_at: 20000
-      sh_degree: 3
-      cull_out_of_bound: false
-      use_deformgs_for_nonrigid: True # default True
-      use_deformgs_after: 3000        # default 3000
-      stop_optimizing_canonical_xyz: True
-    reg:
-      sharp_shape_reg:
-        w: 1.
-        step_interval: 10
-        max_gauss_ratio: 10.
-      out_of_bound_loss:
-        w: 1.
-        stop_after: 30000
-      temporal_smooth_reg:
-        trans:
-          w: 0.01 # optimal value may vary
-          smooth_range: 5 # optimal value may vary
-    optim:
-      xyz:
-        lr: 1.6e-04
-        lr_final: 1.6e-06
-        scale_factor: 2.
-      embedding:
-        lr: 0.001
-        lr_final: 0.0001
-      deform_network:
-        lr: 1.6e-03
-        lr_final: 1.6e-04
-        scale_factor: 5.
-      ins_rotation:
-        lr: 0.00001
-        lr_final: 0.000005
-      ins_translation:
-        lr: 0.0005
-        lr_final: 0.0001
-  SMPLNodes: 
-    type: models.nodes.SMPLNodes
-    init:
-      only_moving: true
-      traj_length_thres: 0.5
-    reg:
-      sharp_shape_reg:
-        w: 1.
-        step_interval: 10
-        max_gauss_ratio: 10.
-      temporal_smooth_reg:
-        trans:
-          w: 0.01 # optimal value may vary
-          smooth_range: 5 # range of frames to consider for smoothing
-        # joint_smooth:
-        #   w: 0.01 # optimal value may vary
-      knn_reg:
-        # lambda_std_x: 0.0001
-        lambda_std_q: 0.001
-        lambda_std_s: 0.001
-        lambda_std_o: 0.001
-        lambda_std_shs_dc: 0.001
-        lambda_std_shs_rest: 0.001
-      max_s_square_reg:
-        w: 0.05
-      x_offset:
-        w: 0.2
-      voxel_deformer_reg:
-        lambda_std_w: 0.6
-        lambda_std_w_rest: 0.5
-        lambda_w_norm: 0.6
-        lambda_w_rest_norm: 0.3
-    optim:
-      xyz:
-        lr: 1.6e-04
-        lr_final: 1.6e-06
-        scale_factor: 3.0
-      rotation:
-        lr: 0.005
-      sh_dc:
-        lr: 0.005
-      sh_rest:
-        lr: 0.00025
-      ins_rotation:
-        lr: 0.00001
-        lr_final: 0.000005
-      ins_translation:
-        lr: 0.0005
-        lr_final: 0.0001
-      smpl_rotation:
-        lr: 0.00005
-        lr_final: 0.00001
-      w_dc_vox:
-        lr: 0.0001
-        lr_final: 0.00001
-        opt_after: 10000
-    ctrl:
-      sh_degree: 1
-      opacity_init_value: 0.99
-      ball_gaussians: false
-      constrain_xyz_offset: false
-      knn_update_interval: 100
-      knn_neighbors: 3
-      use_voxel_deformer: true
-      freeze_x: false
-      freeze_o: false
-      freeze_q: false
-      freeze_s: false
-      freeze_shs_dc: false
-      freeze_shs_rest: false
+    # ctrl:
+    #   # pvg specific
+    #   cycle_length: 0.2
+    #   time_interval: 0.02
+    #   enable_temporal_smoothing: True
+    #   smooth_probability: 0.5
+    #   distribution_span: 1.5 # unit: frame interval
+    #   betas_init: 0.1
+    #   densify_until_num_points: 3_000_000
+    #   densify_t_grad_thresh: 0.002
+    #   densify_t_size_thresh: 0.01
+    #   no_time_split: true
   Sky:
     type: models.modules.EnvLight
     params:
@@ -264,8 +140,10 @@ render:
   render_test: True # whether to render test set
   render_novel: 
     traj_types:
-      - front_center_interp # type of trajectory for novel view synthesis
-    fps: 24 # frames per second for novel view rendering
+      #- front_center_interp # type of trajectory for novel view synthesis, /data/bing.han/drivestudio/utils/camera.py
+      - s_curve
+      #- three_key_poses
+    fps: 15 # frames per second for novel view rendering
   vis_lidar: False # whether to visualize lidar points on ground truth images
   vis_sky: False # whether to include "rgb_sky" and "rgb_sky_blend" in rendered keys
   vis_error: False # whether to include "rgb_error_map" in rendered keys

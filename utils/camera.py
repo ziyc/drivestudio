@@ -64,6 +64,7 @@ def get_interp_novel_trajectories(
 ) -> torch.Tensor:
     original_frames = per_cam_poses[list(per_cam_poses.keys())[0]].shape[0]
     
+    # 在这里定义新轨迹！
     trajectory_generators = {
         "front_center_interp": front_center_interp,
         "s_curve": s_curve,
@@ -87,6 +88,11 @@ def s_curve(
     dataset_type: str, per_cam_poses: Dict[int, torch.Tensor], original_frames: int, target_frames: int
 ) -> torch.Tensor:
     """Create an S-shaped trajectory using the front three cameras."""
+    # ID 0选取第一帧。
+    # 从第二个摄像机（ID 1）选取第一四分之一位置的帧。
+    # 再次从前置中心摄像机（ID 0）选取中间帧（一半位置）。
+    # 从第三个摄像机（ID 2）选取第三四分之一位置的帧。
+    # 最后，再从前置中心摄像机（ID 0）选取最后一帧。
     assert all(cam in per_cam_poses.keys() for cam in [0, 1, 2]), "Front three cameras (IDs 0, 1, 2) are required for s_curve"
     key_poses = torch.cat([
         per_cam_poses[0][0:1],
@@ -103,6 +109,10 @@ def three_key_poses_trajectory(
     original_frames: int,
     target_frames: int
 ) -> torch.Tensor:
+    # 第一个关键姿态：前置中心摄像机的第一帧
+    # 中间关键姿态：随机选择摄像机1或2，获取该摄像机中间帧的姿态。
+    # 使用插值方法（球面线性插值，SLERP）在起始姿态和中间姿态之间插值，生成中间关键姿态。插值仅应用于旋转部分，平移部分直接使用中间帧的数据。
+    # 第三个关键姿态：前置中心摄像机的最后一帧。
     """
     Create a trajectory using three key poses:
     1. First frame of front center camera

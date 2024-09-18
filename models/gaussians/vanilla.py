@@ -111,6 +111,9 @@ class VanillaGaussians(nn.Module):
         else:
             return torch.sigmoid(self._features_dc)
     @property
+    def means(self):
+        return self._means
+    @property
     def shs_0(self):
         return self._features_dc
     @property
@@ -136,11 +139,20 @@ class VanillaGaussians(nn.Module):
             else:
                 return torch.exp(self._scales)
     @property
+    def pure_scaling(self):
+        return self._scales
+    @property
     def get_opacity(self):
         return torch.sigmoid(self._opacities)
     @property
+    def pure_opacity(self):
+        return self._opacities
+    @property
     def get_quats(self):
         return self.quat_act(self._quats)
+    @property
+    def pure_quats(self):
+        return self._quats
     
     def quat_act(self, x: torch.Tensor) -> torch.Tensor:
         return x / x.norm(dim=-1, keepdim=True)
@@ -462,7 +474,10 @@ class VanillaGaussians(nn.Module):
         msg = super().load_state_dict(state_dict, **kwargs)
         return msg
     
+    
+
     def export_gaussians_to_ply(self, alpha_thresh: float) -> Dict:
+        import open3d as o3d
         means = self._means
         direct_color = self.colors
         
@@ -472,3 +487,8 @@ class VanillaGaussians(nn.Module):
             "positions": means[mask],
             "colors": direct_color[mask],
         }
+        # pcd = o3d.geometry.PointCloud()
+        # pcd.points = o3d.utility.Vector3dVector(means[mask])
+        # pcd.colors = o3d.utility.Vector3dVector(direct_color[mask])
+        # return pcd
+

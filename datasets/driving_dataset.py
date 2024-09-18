@@ -732,7 +732,8 @@ class DrivingDataset(SceneDataset):
         
         novel_trajs = {}
         for traj_type in traj_types:
-            novel_trajs[traj_type] = get_interp_novel_trajectories(
+            # 非常重要，生成新视角的路线
+            novel_trajs[traj_type] = get_interp_novel_trajectories( 
                 self.type,
                 self.scene_idx,
                 per_cam_poses,

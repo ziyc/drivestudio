@@ -52,7 +52,8 @@ class SingleTrainer(BasicTrainer):
                     device=self.device
                 )
                 
-            if class_name in self.misc_classes_keys:
+            if class_name in self.misc_classes_keys: 
+                # ['Sky', 'Affine', 'CamPose', 'CamPosePerturb']
                 model = import_str(model_cfg.type)(
                     class_name=class_name,
                     **model_cfg.get('params', {}),
@@ -169,6 +170,7 @@ class SingleTrainer(BasicTrainer):
             cam=processed_cam,
             image_ids=image_infos["img_idx"].flatten()[0]
         )
+        # 重要！得到了GS球，合并了各种class
 
         # render gaussians
         outputs, _ = self.render_gaussians(
@@ -190,7 +192,7 @@ class SingleTrainer(BasicTrainer):
             outputs["rgb_gaussians"] + outputs["rgb_sky"] * (1.0 - outputs["opacity"]), image_infos
         )
         
-        return outputs
+        return outputs,gs
         
     def compute_losses(
         self,

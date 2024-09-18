@@ -36,7 +36,7 @@ def do_evaluation(
     logger.info("Evaluating Pixels...")
     if dataset.test_image_set is not None and cfg.render.render_test:
         logger.info("Evaluating Test Set Pixels...")
-        render_results = render_images(
+        render_results, _ = render_images(
             trainer=trainer,
             dataset=dataset.test_image_set,
             compute_metrics=True,
@@ -93,7 +93,7 @@ def do_evaluation(
         
     if cfg.render.render_full:
         logger.info("Evaluating Full Set...")
-        render_results = render_images(
+        render_results,_ = render_images(
             trainer=trainer,
             dataset=dataset.full_image_set,
             compute_metrics=True,
@@ -147,9 +147,11 @@ def do_evaluation(
         del render_results, vis_frame_dict
         torch.cuda.empty_cache()
     
+    # 生成新视角图像
     render_novel_cfg = cfg.render.get("render_novel", None)
     if render_novel_cfg is not None:
         logger.info("Rendering novel views...")
+        # traj定义运动路线，包括相机c2w
         render_traj = dataset.get_novel_render_traj(
             traj_types=render_novel_cfg.traj_types,
             target_frames=render_novel_cfg.get("frames", dataset.frame_num),
@@ -160,6 +162,7 @@ def do_evaluation(
         
         for traj_type, traj in render_traj.items():
             # Prepare rendering data
+            # 传入traj，使用数据集自带的相机内参，
             render_data = dataset.prepare_novel_view_render_data(traj)
             
             # Render and save video

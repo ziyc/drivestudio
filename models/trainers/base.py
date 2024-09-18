@@ -490,7 +490,8 @@ class BasicTrainer(nn.Module):
         # render sky
         sky_model = self.models['Sky']
         outputs["rgb_sky"] = sky_model(image_infos)
-        outputs["rgb_sky_blend"] = outputs["rgb_sky"] * (1.0 - outputs["opacity"])
+        outputs["rgb_sky_blend"] = outputs["rgb_sky"] * (1.0 - outputs["opacity"]) 
+        # (1-alpha)代表透明度，高斯球越透明，则背景天空权重更大，更多的被填充进来
         
         # affine transformation
         outputs["rgb"] = self.affine_transformation(

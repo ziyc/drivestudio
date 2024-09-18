@@ -10,11 +10,13 @@ import argparse
 
 import torch
 from tools.eval import do_evaluation
-from utils.misc import import_str
+from utils.misc import import_str, export_gaussians_to_ply
 from utils.backup import backup_project
 from utils.logging import MetricLogger, setup_logging
 from models.video_utils import render_images, save_videos
 from datasets.driving_dataset import DrivingDataset
+
+import open3d as o3d
 
 logger = logging.getLogger()
 current_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
@@ -107,11 +109,16 @@ def main(args):
     cfg = setup(args)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    import time
+    start_time_train = time.time()
+    time_last = time.time()
+
     # build dataset
     dataset = DrivingDataset(data_cfg=cfg.data)
 
     # setup trainer
-    trainer = import_str(cfg.trainer.type)(
+    trainer = import_str(cfg.trainer.type)( 
+        # 通过cfg设置trainer类型，在models/trainers里面定义，包括父类base和两个子类MultiTrainer和sigle trainer（vanilla,pvg,deformable）
         **cfg.trainer,
         num_timesteps=dataset.num_img_timesteps,
         model_config=cfg.model,
@@ -185,6 +192,22 @@ def main(args):
     # )
 
     for step in metric_logger.log_every(all_iters, cfg.logging.print_freq):
+        # timing module
+        if step > 0 and step % 5000 == 0:
+            time_now = time.time()
+            total_train_time = time_now - start_time_train
+            last5k_time = time_now - time_last
+            time_last = time_now
+
+            minutes = int(last5k_time // 60)
+            seconds = int(last5k_time % 60)
+            print(f"Time of last 5k steps: {minutes} min {seconds} s")
+
+            minutes = int(total_train_time // 60)
+            seconds = int(total_train_time % 60)
+            print(f"Total train time until now: {minutes} min {seconds} s")
+
+
         #----------------------------------------------------------------------------
         #----------------------------     Validate     ------------------------------
         if step % cfg.logging.vis_freq == 0 and cfg.logging.vis_freq > 0:
@@ -197,7 +220,8 @@ def main(args):
                 dtype=int,
             )[step // cfg.logging.vis_freq]
             with torch.no_grad():
-                render_results = render_images(
+                render_results, gs_collection = render_images(
+                    # 入口，开始渲染
                     trainer=trainer,
                     dataset=dataset.full_image_set,
                     compute_metrics=True,
@@ -207,6 +231,7 @@ def main(args):
                         for i in range(dataset.pixel_source.num_cams)
                     ],
                 )
+
             if args.enable_wandb:
                 wandb.log(
                     {
@@ -254,7 +279,18 @@ def main(args):
                 cam_infos[k] = v.cuda(non_blocking=True)
         
         # forward & backward
-        outputs = trainer(image_infos, cam_infos)
+        outputs, gs_collection = trainer(image_infos, cam_infos)
+
+        # if step > 0 and step % args.save_ply == 0:
+        if step > 0 and step % 10000 == 0:
+            # for class_name, model in trainer.models.items():
+            export_gaussians_to_ply(trainer.models["Background"], cfg.log_dir, f"{args.run_name}_{step}_Background.ply")
+            # pcd = trainer.models["Background"].export_gaussians_to_ply(alpha_thresh=0)
+            # file_name = f"{args.run_name}_{step}_Background.ply"
+            # file_path = f"{cfg.log_dir}/{file_name}"
+            # o3d.io.write_point_cloud(file_path, pcd)
+            print(f"{args.run_name}_{step}_Background.ply stored in {cfg.log_dir}")
+
         trainer.update_visibility_filter()
 
         loss_dict = trainer.compute_losses(
@@ -312,7 +348,7 @@ def main(args):
                 dataset.pixel_source.update_downscale_factor(
                     1 / dataset.pixel_source.buffer_downscale
                 )
-                render_results = render_images(
+                render_results, _ = render_images(
                     trainer=trainer,
                     dataset=dataset.full_image_set,
                 )
@@ -363,7 +399,7 @@ if __name__ == "__main__":
     parser.add_argument("--enable_wandb", action="store_true", help="enable wandb logging")
     parser.add_argument("--entity", default="ziyc", type=str, help="wandb entity name")
     parser.add_argument("--project", default="drivestudio", type=str, help="wandb project name, also used to enhance log_dir")
-    parser.add_argument("--run_name", default="omnire", type=str, help="wandb run name, also used to enhance log_dir")
+    parser.add_argument("--run_name", default="test", type=str, help="wandb run name, also used to enhance log_dir")
     
     # viewer
     parser.add_argument("--enable_viewer", action="store_true", help="enable viewer")
@@ -371,6 +407,7 @@ if __name__ == "__main__":
     
     # misc
     parser.add_argument("opts", help="Modify config options using the command-line", default=None, nargs=argparse.REMAINDER)
-    
+    parser.add_argument("--save_ply", default=2000, type=int, help="save ply every n steps", )
+
     args = parser.parse_args()
     final_step = main(args)

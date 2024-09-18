@@ -59,7 +59,7 @@ def render_images(
         vis_indices (Optional[List[int]], optional): Indices to visualize. Defaults to None.
     """
     trainer.set_eval()
-    render_results = render(
+    render_results,gs_collection = render(
         dataset,
         trainer=trainer,
         compute_metrics=compute_metrics,
@@ -81,7 +81,7 @@ def render_images(
         logger.info(f"\tVehicle-Only PSNR: {render_results['vehicle_psnr']:.4f}")
         logger.info(f"\tVehicle-Only SSIM: {render_results['vehicle_ssim']:.4f}")
 
-    return render_results
+    return render_results, gs_collection
 
 
 def render(
@@ -137,7 +137,7 @@ def render(
                 if isinstance(v, Tensor):
                     cam_infos[k] = v.cuda(non_blocking=True)
             # render the image
-            results = trainer(image_infos, cam_infos)
+            results, gs_collection = trainer(image_infos, cam_infos) # 调用之前定义好的trainer
             
             # ------------- clip rgb ------------- #
             for k, v in results.items():
@@ -378,7 +378,7 @@ def render(
         results_dict["SMPLNodes_opacities"] = SMPLNodes_opacities
     if len(Dynamic_opacities) > 0:
         results_dict["Dynamic_opacities"] = Dynamic_opacities
-    return results_dict
+    return results_dict,gs_collection
 
 
 def save_videos(
@@ -443,7 +443,7 @@ def render_novel_views(trainer, render_data: list, save_path: str, fps: int = 30
                 frame_data["image_infos"][key] = value.cuda(non_blocking=True)
             
             # Perform rendering
-            outputs = trainer(
+            outputs,_ = trainer(
                 image_infos=frame_data["image_infos"],
                 camera_infos=frame_data["cam_infos"],
                 novel_view=True
