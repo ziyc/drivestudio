@@ -139,19 +139,19 @@ class VanillaGaussians(nn.Module):
             else:
                 return torch.exp(self._scales)
     @property
-    def pure_scaling(self):
+    def scales(self):
         return self._scales
     @property
     def get_opacity(self):
         return torch.sigmoid(self._opacities)
     @property
-    def pure_opacity(self):
+    def opacities(self):
         return self._opacities
     @property
     def get_quats(self):
         return self.quat_act(self._quats)
     @property
-    def pure_quats(self):
+    def quats(self):
         return self._quats
     
     def quat_act(self, x: torch.Tensor) -> torch.Tensor:
