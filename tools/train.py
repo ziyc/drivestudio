@@ -281,16 +281,6 @@ def main(args):
         # forward & backward
         outputs, gs_collection = trainer(image_infos, cam_infos)
 
-        # if step > 0 and step % args.save_ply == 0:
-        if step > 0 and step % 10000 == 0:
-            # for class_name, model in trainer.models.items():
-            export_gaussians_to_ply(trainer.models["Background"], cfg.log_dir, f"{args.run_name}_{step}_Background.ply")
-            # pcd = trainer.models["Background"].export_gaussians_to_ply(alpha_thresh=0)
-            # file_name = f"{args.run_name}_{step}_Background.ply"
-            # file_path = f"{cfg.log_dir}/{file_name}"
-            # o3d.io.write_point_cloud(file_path, pcd)
-            print(f"{args.run_name}_{step}_Background.ply stored in {cfg.log_dir}")
-
         trainer.update_visibility_filter()
 
         loss_dict = trainer.compute_losses(
@@ -335,7 +325,18 @@ def main(args):
                 save_only_model=True,
                 is_final=step == trainer.num_iters,
             )
-        
+
+        do_save_ply = step > 0 and (
+            (step % cfg.logging.export_freq == 0) or (step == trainer.num_iters)
+        ) and (args.resume_from is None)
+        if do_save_ply: 
+            # for class_name, model in trainer.models.items():
+            export_gaussians_to_ply(trainer.models["Background"], cfg.log_dir, f"{args.run_name}_{step}_Background.ply")
+            # pcd = trainer.models["Background"].export_gaussians_to_ply(alpha_thresh=0)
+            # file_name = f"{args.run_name}_{step}_Background.ply"
+            # file_path = f"{cfg.log_dir}/{file_name}"
+            # o3d.io.write_point_cloud(file_path, pcd)
+
         #----------------------------------------------------------------------------
         #------------------------    Cache Image Error    ---------------------------
         if (
