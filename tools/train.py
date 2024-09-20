@@ -283,6 +283,15 @@ def main(args):
 
         trainer.update_visibility_filter()
 
+        if step > 0 and step % 5000 == 0:
+            # for class_name, model in trainer.models.items():
+            export_gaussians_to_ply(trainer.models["Background"], cfg.log_dir, f"{args.run_name}_{step}_Background.ply")
+            # pcd = trainer.models["Background"].export_gaussians_to_ply(alpha_thresh=0)
+            # file_name = f"{args.run_name}_{step}_Background.ply"
+            # file_path = f"{cfg.log_dir}/{file_name}"
+            # o3d.io.write_point_cloud(file_path, pcd)
+            print(f"{args.run_name}_{step}_Background.ply stored in {cfg.log_dir}")
+        
         loss_dict = trainer.compute_losses(
             outputs=outputs,
             image_infos=image_infos,

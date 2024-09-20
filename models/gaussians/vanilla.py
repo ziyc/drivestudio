@@ -123,6 +123,18 @@ class VanillaGaussians(nn.Module):
     def num_points(self):
         return self._means.shape[0]
     @property
+    def means(self):
+        return self._means
+    @property
+    def pure_scaling(self):
+        return self._scales
+    @property
+    def pure_opacity(self):
+        return self._opacities
+    @property
+    def pure_quats(self):
+        return self._quats
+    @property
     def get_scaling(self):
         if self.ball_gaussians:
             if self.gaussian_2d:
@@ -487,8 +499,3 @@ class VanillaGaussians(nn.Module):
             "positions": means[mask],
             "colors": direct_color[mask],
         }
-        # pcd = o3d.geometry.PointCloud()
-        # pcd.points = o3d.utility.Vector3dVector(means[mask])
-        # pcd.colors = o3d.utility.Vector3dVector(direct_color[mask])
-        # return pcd
-
