@@ -10,9 +10,9 @@
 data:
   data_root: data/waymo/processed/training # data root for the dataset
   dataset: waymo
-  scene_idx: 3 # which scene to use, [0, 798] for waymo's training set and [0, 849] for nuscenes's train/val sets, inclusive
+  scene_idx: 16 # which scene to use, [0, 798] for waymo's training set and [0, 849] for nuscenes's train/val sets, inclusive
   start_timestep: 0 # which timestep to start from
-  end_timestep: 50 # which timestep to end at, -1 means the last timestep
+  end_timestep: -1 # which timestep to end at, -1 means the last timestep
   preload_device: cpu # choose from ["cpu", "cuda"], cache the data on this device.
   pixel_source: # image source and object annotations
     type: datasets.waymo.waymo_sourceloader.WaymoPixelSource

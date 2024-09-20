@@ -125,10 +125,10 @@ def do_evaluation(
             logger.info(f"Image evaluation metrics saved to {full_metrics_file}")
 
         if args.render_video_postfix is None:
-            video_output_pth = f"{cfg.log_dir}/videos{post_fix}/full_set_{step}.mp4"
+            video_output_pth = f"{cfg.log_dir}/videos{post_fix}/full_set_{args.run_name}_{step}.mp4"
         else:
             video_output_pth = (
-                f"{cfg.log_dir}/videos{post_fix}/full_set_{step}_{args.render_video_postfix}.mp4"
+                f"{cfg.log_dir}/videos{post_fix}/full_set_{args.run_name}_{step}_{args.render_video_postfix}.mp4"
             )
         vis_frame_dict = save_videos(
             render_results,
@@ -166,7 +166,7 @@ def do_evaluation(
             render_data = dataset.prepare_novel_view_render_data(traj)
             
             # Render and save video
-            save_path = os.path.join(video_output_dir, f"{traj_type}.mp4")
+            save_path = os.path.join(video_output_dir, f"{args.run_name}_{traj_type}.mp4")
             render_novel_views(
                 trainer, render_data, save_path,
                 fps=render_novel_cfg.get("fps", cfg.render.fps)
@@ -212,18 +212,18 @@ def main(args):
     
     # define render keys
     render_keys = [
-        "gt_rgbs",
-        "rgbs",
-        "Background_rgbs",
-        "RigidNodes_rgbs",
-        "DeformableNodes_rgbs",
-        "SMPLNodes_rgbs",
-        # "depths",
+        # "gt_rgbs",
+        # "rgbs",
+        # "Background_rgbs",
+        # "RigidNodes_rgbs",
+        # "DeformableNodes_rgbs",
+        # "SMPLNodes_rgbs",
+        "depths",
         # "Background_depths",
         # "RigidNodes_depths",
         # "DeformableNodes_depths",
         # "SMPLNodes_depths",
-        # "mask"
+        "mask"
     ]
     if cfg.render.vis_lidar:
         render_keys.insert(0, "lidar_on_images")
@@ -255,7 +255,7 @@ if __name__ == "__main__":
     parser.add_argument("--resume_from", default=None, help="path to checkpoint to resume from", type=str, required=True)
     parser.add_argument("--render_video_postfix", type=str, default=None, help="an optional postfix for video")    
     parser.add_argument("--save_catted_videos", type=bool, default=False, help="visualize lidar on image")
-    
+    parser.add_argument("--run_name", default="test", type=str, help="wandb run name, also used to enhance log_dir")
     # viewer
     parser.add_argument("--enable_viewer", action="store_true", help="enable viewer")
     parser.add_argument("--viewer_port", type=int, default=8080, help="viewer port")
