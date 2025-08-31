@@ -79,7 +79,13 @@ class RigidNodes(VanillaGaussians):
         distances = torch.from_numpy(distances)
         avg_dist = distances.mean(dim=-1, keepdim=True).to(self.device)
         avg_dist = avg_dist.clamp(0.002, 100)
-        self._scales = Parameter(torch.log(avg_dist.repeat(1, 3)))
+        if self.ball_gaussians:
+            self._scales = Parameter(torch.log(avg_dist.repeat(1, 1)))
+        else:
+            if self.gaussian_2d:
+                self._scales = Parameter(torch.log(avg_dist.repeat(1, 2)))
+            else:
+                self._scales = Parameter(torch.log(avg_dist.repeat(1, 3)))
         self._quats = Parameter(random_quat_tensor(self.num_points).to(self.device))
         dim_sh = num_sh_bases(self.sh_degree)
         
