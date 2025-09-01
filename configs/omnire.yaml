@@ -276,3 +276,4 @@ logging:
   print_freq: 500 # how often to print training stats
   saveckpt_freq: 15000 # how often to save checkpoints
   save_seperate_video: True # whether to save seperate videos for each scene
+  export_freq: 10000 # how often to export ply files
