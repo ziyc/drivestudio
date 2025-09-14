@@ -1,0 +1,27 @@
+version: "3.9"
+services:
+  dev_smplx:
+    build:
+      context: .
+      dockerfile: Dockerfile-smplx-only
+      target: smplx
+      args:
+        USERID: ${USERID:-1000}
+        GID: ${GID:-1000}
+        UNAME: ${UNAME:-user}
+        PASSWORD: ${PASSWORD:-password}
+    image: drivestudio:smplx-only
+    container_name: drivestudio-${UNAME:-user}-dev-smplx
+    working_dir: /workspace/drivestudio
+    environment:
+      EGL_MODE: ${EGL_MODE:-1}
+      DISPLAY: ${DISPLAY:-:99}
+      NFS_ASSETS_PATH: ${NFS_ASSETS_PATH:-/nfs/assets}
+      PYTHONPATH: /workspace/drivestudio
+    volumes:
+      - ./:/workspace/drivestudio
+      - ${NFS_ASSETS_PATH:-/nfs/assets}:/nfs/assets:ro
+    shm_size: "16gb"
+    gpus: all
+    tty: true
+    stdin_open: true

@@ -120,6 +120,22 @@ pip install -e .
 cd ../..
 ```
 
+## 🐳 Docker-based Setup
+Alternatively, you can use Docker for a containerized environment. Ensure you have Docker and [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) installed.
+
+1.  **Build the Docker image:**
+    ```shell
+    docker compose build
+    ```
+
+2.  **Run the container:**
+    ```shell
+    docker compose run --rm drivestudio
+    ```
+    This will launch a bash shell inside the container with all dependencies installed and the project directory mounted.
+
+    *Note on datasets:* The `docker-compose.yml` file is configured to mount the project directory. If your datasets are stored outside this directory, you will need to add the path to the `volumes` section in `docker-compose.yml`.
+
 ## 📊 Prepare Data
 We support most popular public driving datasets. Detailed instructions for downloading and processing each dataset are available in the following documents:
 

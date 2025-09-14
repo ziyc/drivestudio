@@ -1,0 +1,16 @@
+# Git files
+.git
+.gitignore
+.gitmodules
+
+# Python cache
+*.pyc
+__pycache__/
+
+# IDE settings
+.idea/
+.vscode/
+
+# Outputs
+logs/
+outputs/
