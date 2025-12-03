@@ -28,6 +28,7 @@ simulated_results/
 sky_masks/
 fine_dynamic_masks_example/
 *.sh
+!scripts/nuscenes.sh
 pandaset-devkit/
 
 # C extensions
