@@ -1,0 +1,26 @@
+# syntax=docker/dockerfile:1.4
+
+ARG BASE_IMAGE=base
+FROM ${BASE_IMAGE}
+
+# NuScenes-specific toolkit
+RUN python3 -m pip install nuscenes-devkit
+
+# SegFormer env for mask preprocessing (isolated from the main Torch 2 stack)
+ENV SEGFORMER_ROOT=/opt/segformer \
+    SEGFORMER_CONDA=/opt/miniforge/envs/segformer \
+    MINIFORGE_URL=https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+
+RUN wget -q ${MINIFORGE_URL} -O /tmp/miniforge.sh \
+    && bash /tmp/miniforge.sh -b -p /opt/miniforge \
+    && rm /tmp/miniforge.sh \
+    && /opt/miniforge/bin/conda create -y -n segformer python=3.8 \
+    && /opt/miniforge/bin/conda run -n segformer pip install torch==1.8.1+cu111 torchvision==0.9.1+cu111 torchaudio==0.8.1 -f https://download.pytorch.org/whl/torch_stable.html \
+    && /opt/miniforge/bin/conda run -n segformer pip install timm==0.3.2 pylint debugpy opencv-python-headless attrs ipython tqdm imageio scikit-image omegaconf \
+    && /opt/miniforge/bin/conda run -n segformer pip install mmcv-full==1.2.7 --no-cache-dir -f https://download.openmmlab.com/mmcv/dist/cu111/torch1.8/index.html \
+    && git clone https://github.com/NVlabs/SegFormer ${SEGFORMER_ROOT} \
+    && /opt/miniforge/bin/conda run -n segformer pip install ${SEGFORMER_ROOT} \
+    && /opt/miniforge/bin/conda clean -afy
+
+# Keep conda available without overriding the system Python used by the project
+ENV PATH=${PATH}:/opt/miniforge/bin

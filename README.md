@@ -120,6 +120,13 @@ pip install -e .
 cd ../..
 ```
 
+## 🐳 Docker Build
+- Build base + NuScenes images with Buildx bake:  
+  `docker buildx bake` (uses `docker-bake.hcl`, tags `drivestudio:base` and `drivestudio:nuscenes`)
+- Build a single target: `docker buildx bake nuscenes`
+- Override tag prefix: `TAG_PREFIX=myrepo/drivestudio docker buildx bake`
+- See `docker/README.md` for target details and a sample `docker run` command.
+
 ## 📊 Prepare Data
 We support most popular public driving datasets. Detailed instructions for downloading and processing each dataset are available in the following documents:
 

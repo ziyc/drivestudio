@@ -1,0 +1,39 @@
+FROM nvidia/cuda:11.7.1-cudnn8-devel-ubuntu22.04
+
+ARG TORCH_CUDA_ARCH_LIST="8.6"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1 \
+    TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
+
+ENV PIP_NO_BUILD_ISOLATION=1 \
+    PIP_USE_PEP517=0
+
+# Common system dependencies for building/running PyTorch, Open3D, OpenCV, gsplat, nvdiffrast, and pytorch3d.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-dev python3-pip python3-venv python3-setuptools \
+    git curl wget ca-certificates \
+    build-essential cmake ninja-build pkg-config \
+    libssl-dev libffi-dev \
+    libglib2.0-0 libgl1 libgl1-mesa-dev libxext-dev libx11-dev libxi-dev \
+    libjpeg-dev libpng-dev ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install "pip<24"
+
+WORKDIR /workspace/drivestudio
+COPY . .
+
+# Core project dependencies and local modules shared across datasets.
+# Disable build isolation so legacy packages like chumpy can find pip during build.
+RUN python3 -m pip install --no-build-isolation --no-use-pep517 -r requirements.txt
+RUN python3 -m pip install --no-build-isolation --no-use-pep517 git+https://github.com/nerfstudio-project/gsplat.git@v1.3.0
+RUN python3 -m pip install --no-build-isolation --no-use-pep517 git+https://github.com/facebookresearch/pytorch3d.git
+RUN python3 -m pip install --no-build-isolation --no-use-pep517 git+https://github.com/NVlabs/nvdiffrast
+RUN python3 -m pip install --no-build-isolation --no-use-pep517 -e third_party/smplx
+
+ENV PYTHONPATH=/workspace/drivestudio
+
+CMD ["bash"]
