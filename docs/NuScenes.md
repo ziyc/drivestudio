@@ -24,12 +24,29 @@ We'll use the **v1.0-mini split** in our examples. The process is similar for ot
 pip install nuscenes-devkit
 ```
 
+## 2.5 Build the NuScenes Docker Image
+Instead of installing locally, you can build a NuScenes-ready image and run DriveStudio inside it.
+
+```shell
+# From repo root
+docker buildx bake nuscenes
+# tags: drivestudio:base and drivestudio:nuscenes (set TAG_PREFIX to override)
+```
+
+Run with GPUs and mount your data:
+```shell
+docker run --gpus all -it --rm \
+  -v ${PATH_TO_NUSCENES}:/workspace/drivestudio/data \
+  drivestudio:nuscenes
+```
+
+`PYTHONPATH` is preset in the image; work under `/workspace/drivestudio`. Prepare/mount `data/nuscenes/raw` as described below. See `docker/README.md` for target details and optional flags.
+
 ## 3. Process Raw Data
 
 To process the 10 scenes in NuScenes **v1.0-mini split**, you can run:
 
 ```shell
-# export PYTHONPATH=\path\to\project
 python datasets/preprocess.py \
     --data_root data/nuscenes/raw \
     --target_dir data/nuscenes/processed \
@@ -63,6 +80,8 @@ Follow these steps:
 #### Install `SegFormer` (Skip if already installed)
 
 :warning: SegFormer relies on `mmcv-full=1.2.7`, which relies on `pytorch=1.8` (pytorch<1.9). Hence, a separate conda env is required.
+
+If you're using the `drivestudio:nuscenes` Docker image, SegFormer is already installed in a dedicated conda env named `segformer` with the code at `/opt/segformer`; you can skip the install steps below and run the commands with `conda run -n segformer`.
 
 ```shell
 #-- Set conda env
