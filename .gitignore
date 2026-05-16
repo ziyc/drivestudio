@@ -25,11 +25,28 @@ run_scripts/
 downloads/
 method_compare/
 simulated_results/
+visualization_outputs/
+OutPut/
+可视化结果/
 sky_masks/
 fine_dynamic_masks_example/
+*.tfrecord
+*.pth
+*.pt
+*.ckpt
+*.mp4
+*.avi
+*.mov
+*.ply
 *.sh
 !scripts/nuscenes.sh
+!omnire_workflow/**/*.sh
 pandaset-devkit/
+
+# bundled external tools: keep source code, ignore generated/sample datasets
+external_tools/**/data/
+external_tools/**/dataset/KITTI/
+external_tools/**/dataset/waymo/
 
 # C extensions
 *.so

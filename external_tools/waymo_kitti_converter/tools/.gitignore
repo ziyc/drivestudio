@@ -1,0 +1,14 @@
+kitti/
+waymo/
+waymo_kitti/
+waymo_old/
+waymo_raw/
+waymo_kitti_results/
+waymo_submission/
+dataloader/
+pkl_debug/
+pose/
+__pycache__/
+*.swp
+*.tar.gz
+
