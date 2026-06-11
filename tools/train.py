@@ -11,6 +11,7 @@ import argparse
 import torch
 from tools.eval import do_evaluation
 from utils.misc import import_str
+from utils.output_paths import build_auto_output_dir, count_cameras
 from utils.backup import backup_project
 from utils.logging import MetricLogger, setup_logging
 from models.video_utils import render_images, save_videos
@@ -50,7 +51,17 @@ def setup(args):
     
     # merge cli
     cfg = OmegaConf.merge(cfg, args_from_cli)
-    log_dir = os.path.join(args.output_root, args.project, args.run_name)
+    if args.manual_output:
+        log_dir = os.path.join(args.output_root, args.project, args.run_name)
+    else:
+        log_dir = build_auto_output_dir(
+            args.output_root,
+            "train",
+            cfg.data.dataset,
+            f"s{cfg.data.scene_idx}",
+            f"cam{count_cameras(cfg.data.pixel_source.cameras)}",
+            f"step{cfg.trainer.optim.num_iters}",
+        )
     
     # update config and create log dir
     cfg.log_dir = log_dir
@@ -353,7 +364,8 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Train Gaussian Splatting for a single scene")
     parser.add_argument("--config_file", help="path to config file", type=str)
-    parser.add_argument("--output_root", default="./work_dirs/", help="path to save checkpoints and logs", type=str)
+    parser.add_argument("--output_root", default="./outputs", help="root directory for command outputs", type=str)
+    parser.add_argument("--manual_output", action="store_true", help="use output_root/project/run_name instead of auto-generated directories")
     
     # eval
     parser.add_argument("--resume_from", default=None, help="path to checkpoint to resume from", type=str)
@@ -362,8 +374,8 @@ if __name__ == "__main__":
     # wandb logging part
     parser.add_argument("--enable_wandb", action="store_true", help="enable wandb logging")
     parser.add_argument("--entity", default="ziyc", type=str, help="wandb entity name")
-    parser.add_argument("--project", default="drivestudio", type=str, help="wandb project name, also used to enhance log_dir")
-    parser.add_argument("--run_name", default="omnire", type=str, help="wandb run name, also used to enhance log_dir")
+    parser.add_argument("--project", default="drivestudio", type=str, help="wandb project name; also used for manual output mode")
+    parser.add_argument("--run_name", default="omnire", type=str, help="wandb run name; also used for manual output mode")
     
     # viewer
     parser.add_argument("--enable_viewer", action="store_true", help="enable viewer")

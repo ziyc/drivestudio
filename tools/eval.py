@@ -10,6 +10,7 @@ import argparse
 import torch
 from datasets.driving_dataset import DrivingDataset
 from utils.misc import import_str
+from utils.output_paths import build_auto_output_dir, count_cameras
 from models.trainers import BasicTrainer
 from models.video_utils import (
     render_images,
@@ -19,6 +20,21 @@ from models.video_utils import (
 
 logger = logging.getLogger()
 current_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
+
+
+def build_traj_kwargs(render_novel_cfg) -> dict:
+    traj_kwargs = {}
+    base_camera_id = render_novel_cfg.get("base_camera_id", None)
+    lane_offset = render_novel_cfg.get("lane_offset", None)
+    for traj_type in render_novel_cfg.get("traj_types", []):
+        if traj_type in {"raw_lane_offset_right", "raw_lane_offset_left"}:
+            kwargs = {}
+            if base_camera_id is not None:
+                kwargs["base_camera_id"] = base_camera_id
+            if lane_offset is not None:
+                kwargs["lane_offset_meters"] = lane_offset
+            traj_kwargs[traj_type] = kwargs
+    return traj_kwargs
 
 @torch.no_grad()
 def do_evaluation(
@@ -150,9 +166,11 @@ def do_evaluation(
     render_novel_cfg = cfg.render.get("render_novel", None)
     if render_novel_cfg is not None:
         logger.info("Rendering novel views...")
+        traj_kwargs = build_traj_kwargs(render_novel_cfg)
         render_traj = dataset.get_novel_render_traj(
             traj_types=render_novel_cfg.traj_types,
             target_frames=render_novel_cfg.get("frames", dataset.frame_num),
+            traj_kwargs=traj_kwargs,
         )
         video_output_dir = f"{cfg.log_dir}/videos{post_fix}/novel_{step}"
         if not os.path.exists(video_output_dir):
@@ -160,7 +178,10 @@ def do_evaluation(
         
         for traj_type, traj in render_traj.items():
             # Prepare rendering data
-            render_data = dataset.prepare_novel_view_render_data(traj)
+            render_data = dataset.prepare_novel_view_render_data(
+                traj,
+                cam_id=render_novel_cfg.get("base_camera_id", None),
+            )
             
             # Render and save video
             save_path = os.path.join(video_output_dir, f"{traj_type}.mp4")
@@ -171,12 +192,10 @@ def do_evaluation(
             logger.info(f"Saved novel view video for trajectory type: {traj_type} to {save_path}")
             
 def main(args):
-    log_dir = os.path.dirname(args.resume_from)
-    cfg = OmegaConf.load(os.path.join(log_dir, "config.yaml"))
+    source_log_dir = os.path.dirname(args.resume_from)
+    cfg = OmegaConf.load(os.path.join(source_log_dir, "config.yaml"))
     cfg = OmegaConf.merge(cfg, OmegaConf.from_cli(args.opts))
     args.enable_wandb = False
-    for folder in ["videos_eval", "metrics_eval"]:
-        os.makedirs(os.path.join(log_dir, folder), exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # build dataset
@@ -199,6 +218,20 @@ def main(args):
         ckpt_path=args.resume_from,
         load_only_model=True
     )
+    if args.output_dir is not None:
+        log_dir = args.output_dir
+    else:
+        log_dir = build_auto_output_dir(
+            args.output_root,
+            "eval",
+            cfg.data.dataset,
+            f"s{cfg.data.scene_idx}",
+            f"cam{count_cameras(cfg.data.pixel_source.cameras)}",
+            f"step{trainer.step}",
+        )
+    cfg.log_dir = log_dir
+    for folder in ["videos_eval", "metrics_eval"]:
+        os.makedirs(os.path.join(log_dir, folder), exist_ok=True)
     logger.info(
         f"Resuming training from {args.resume_from}, starting at step {trainer.step}"
     )
@@ -250,6 +283,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("Train Gaussian Splatting for a single scene")    
     # eval
     parser.add_argument("--resume_from", default=None, help="path to checkpoint to resume from", type=str, required=True)
+    parser.add_argument("--output_root", default="./outputs", help="root directory for command outputs", type=str)
+    parser.add_argument("--output_dir", default=None, help="override eval output directory", type=str)
     parser.add_argument("--render_video_postfix", type=str, default=None, help="an optional postfix for video")    
     parser.add_argument("--save_catted_videos", type=bool, default=False, help="visualize lidar on image")
     
