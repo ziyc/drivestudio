@@ -107,17 +107,10 @@ git clone --recursive https://github.com/ziyc/drivestudio.git
 cd drivestudio
 
 # Create the environment
-conda create -n drivestudio python=3.9 -y
-conda activate drivestudio
-pip install -r requirements.txt
-pip install git+https://github.com/nerfstudio-project/gsplat.git@v1.3.0
-pip install git+https://github.com/facebookresearch/pytorch3d.git
-pip install git+https://github.com/NVlabs/nvdiffrast
+uv sync
 
-# Set up for SMPL Gaussians
-cd third_party/smplx/
-pip install -e .
-cd ../..
+# Dataset-prep extras (NuScenes devkit, HF segmentation)
+uv sync --group data
 ```
 
 ## 📊 Prepare Data

@@ -1,0 +1,69 @@
+[project]
+name = "drivestudio-local"
+version = "0.1.0"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "setuptools==70.2.0",
+    "wheel",
+    "ninja",
+    "cmake",
+    "packaging",
+    "timm==0.9.5",
+    "pytorch-msssim==1.0.0",
+    "omegaconf==2.3.0",
+    "torchmetrics==0.10.3",
+    "tensorboard==2.11.0",
+    "wandb==0.15.8",
+    "matplotlib==3.5.3",
+    "plotly==5.13.1",
+    "viser==0.2.1",
+    "imageio>=2.37.3",
+    "imageio-ffmpeg>=0.6.0",
+    "scikit-image==0.20.0",
+    "opencv-python>=4.11.0.86",
+    "open3d==0.16.0",
+    "pyquaternion==0.9.9",
+    "chumpy>=0.70",
+    "numpy==1.23.1",
+    "kornia==0.7.2",
+    "tqdm>=4.67.3",
+    "gdown>=6.1.0",
+    "nerfview==0.0.3",
+    "lpips==0.1.4",
+    "gsplat>=1.5.3",
+    "pytorch3d>=0.7.8",
+    "nvdiffrast>=0.4.0",
+    "smplx",
+]
+
+[dependency-groups]
+data = [
+    "nuscenes-devkit>=1.1.11",
+    "transformers>=4.48.0",
+]
+
+[tool.uv]
+package = false
+no-build-isolation-package = ["gsplat", "pytorch3d", "nvdiffrast"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
+torchaudio = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
+
+gsplat = { git = "https://github.com/nerfstudio-project/gsplat.git", tag = "v1.3.0" }
+pytorch3d = { git = "https://github.com/facebookresearch/pytorch3d.git", branch = "stable" }
+nvdiffrast = { git = "https://github.com/NVlabs/nvdiffrast.git" }
+
+smplx = { path = "third_party/smplx", editable = true }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.extra-build-dependencies]
+chumpy = ["pip"]
