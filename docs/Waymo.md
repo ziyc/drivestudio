@@ -11,8 +11,8 @@ Once you've registered and installed the gcloud SDK, create a directory to house
 
 ```shell
 # Create the data directory or create a symbolic link to the data directory
-mkdir -p ./data/waymo/raw   
-mkdir -p ./data/waymo/processed 
+mkdir -p ./data/waymo/raw
+mkdir -p ./data/waymo/processed
 ```
 
 ## 2. Download the raw data
@@ -93,52 +93,27 @@ To generate:
 
 Follow these steps:
 
-#### Install `SegFormer` (Skip if already installed)
+#### Install Data Prep Dependencies
 
-:warning: SegFormer relies on `mmcv-full=1.2.7`, which relies on `pytorch=1.8` (pytorch<1.9). Hence, a seperate conda env is required.
-
-```shell
-#-- Set conda env
-conda create -n segformer python=3.8
-conda activate segformer
-# conda install pytorch==1.8.1 torchvision==0.9.1 torchaudio==0.8.1 cudatoolkit=11.3 -c pytorch -c conda-forge
-pip install torch==1.8.1+cu111 torchvision==0.9.1+cu111 torchaudio==0.8.1 -f https://download.pytorch.org/whl/torch_stable.html
-
-#-- Install mmcv-full
-pip install timm==0.3.2 pylint debugpy opencv-python-headless attrs ipython tqdm imageio scikit-image omegaconf
-pip install mmcv-full==1.2.7 --no-cache-dir
-
-#-- Clone and install segformer
-git clone https://github.com/NVlabs/SegFormer
-cd SegFormer
-pip install .
-```
-
-Download the pretrained model `segformer.b5.1024x1024.city.160k.pth` from the google_drive / one_drive links in https://github.com/NVlabs/SegFormer#evaluation .
-
-Remember the location where you download into, and pass it to the script in the next step with `--checkpoint` .
+`extract_masks.py` now uses the Hugging Face SegFormer backend directly from the main project environment.
 
 <details>
-<summary>Troubleshooting: SegFormer Checkpoint Download</summary>
+<summary>Troubleshooting: Hugging Face Model Download</summary>
 
-If you encounter problems downloading the original SegFormer checkpoint from the official links, you can alternatively download a backup copy using command: `gdown 1e7DECAH0TRtPZM6hTqRGoboq1XPqSmuj`
+If the default Hugging Face model download is slow or blocked, pre-download the model with the Hugging Face CLI and keep the same `--hf_model_id` in the command below.
 </details>
 
 
 #### Run Mask Extraction Script
 
 ```shell
-conda activate segformer
-segformer_path=/pathtosegformer
+uv sync --group data
 
 python datasets/tools/extract_masks.py \
     --data_root data/waymo/processed/training \
-    --segformer_path=$segformer_path \
-    --checkpoint=$segformer_path/pretrained/segformer.b5.1024x1024.city.160k.pth \
     --split_file data/waymo_example_scenes.txt \
     --process_dynamic_mask
 ```
-Replace `/pathtosegformer` with the actual path to your Segformer installation.
 
 Note: The `--process_dynamic_mask` flag is included to process fine dynamic masks along with sky masks.
 
