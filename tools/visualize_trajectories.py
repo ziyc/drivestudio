@@ -20,7 +20,6 @@ from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
 
 from utils.camera import front_center_key_poses, get_interp_novel_trajectories
-from utils.config import load_config
 from utils.misc import import_str
 
 
@@ -60,7 +59,7 @@ def parse_args():
 
 
 def load_cfg(args):
-    cfg = load_config(args.config_file)
+    cfg = OmegaConf.load(args.config_file)
     args_from_cli = OmegaConf.from_cli(args.opts)
 
     if "dataset" in args_from_cli:

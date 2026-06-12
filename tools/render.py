@@ -19,7 +19,6 @@ if REPO_ROOT not in sys.path:
 from datasets.driving_dataset import DrivingDataset
 from tools.visualize_trajectories import plot_trajectory_3d, trajectory_key_poses
 from utils.camera import list_registered_trajectories
-from utils.config import merge_optional_config
 from utils.misc import import_str
 from utils.output_paths import build_auto_output_dir, count_cameras
 
@@ -250,7 +249,8 @@ def get_reference_poses(dataset, base_camera_id: int) -> np.ndarray | None:
 def load_cfg_and_dataset(args):
     log_dir = os.path.dirname(args.resume_from)
     cfg = OmegaConf.load(os.path.join(log_dir, "config.yaml"))
-    cfg = merge_optional_config(cfg, args.config_file)
+    if args.config_file:
+        cfg = OmegaConf.merge(cfg, OmegaConf.load(args.config_file))
     cfg = OmegaConf.merge(cfg, OmegaConf.from_cli(args.opts))
     dataset = DrivingDataset(data_cfg=cfg.data)
     return cfg, dataset
