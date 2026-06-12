@@ -210,6 +210,21 @@ def _ego_frame_lane_offset(
         offset_poses = interpolate_poses(offset_poses, target_frames)
     return offset_poses
 
+@register_trajectory("ego_raw")
+def ego_raw(
+    per_cam_poses: Dict[int, torch.Tensor],
+    original_frames: int,
+    target_frames: int,
+    base_camera_id: int = 0,
+) -> torch.Tensor:
+    if base_camera_id not in per_cam_poses:
+        raise ValueError(f"Camera {base_camera_id} is not available")
+    poses = per_cam_poses[base_camera_id]
+    if target_frames is None or target_frames == poses.shape[0]:
+        return poses.clone()
+    return sample_raw_poses(poses, target_frames)
+
+
 @register_trajectory("lane_offset_left")
 def lane_offset_left(
     per_cam_poses: Dict[int, torch.Tensor],
