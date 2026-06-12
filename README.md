@@ -126,7 +126,6 @@ We support most popular public driving datasets. Detailed instructions for downl
 ## 🚀 Running
 ### Training
 ```shell
-export PYTHONPATH=$(pwd)
 start_timestep=0 # start frame index for training
 end_timestep=-1 # end frame index, -1 for the last frame
 
@@ -149,6 +148,8 @@ python tools/train.py \
 ```shell
 python tools/eval.py --resume_from $ckpt_path
 ```
+
+- `tools/train.py`, `tools/eval.py`, and `tools/render.py` can be run directly from the repo root without setting `PYTHONPATH`.
 
 <details>
 <summary>Compare with OmniRe</summary>

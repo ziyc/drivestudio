@@ -9,6 +9,7 @@
 ## Real Entry Points
 - Train one scene: `python tools/train.py --config_file <config> --output_root <dir> --project <name> --run_name <name> dataset=<dataset/cams> data.scene_idx=<idx> [more OmegaConf overrides]`
 - Evaluate/render from a checkpoint: `python tools/eval.py --resume_from <log_dir/checkpoint_*.pth> [OmegaConf overrides]`
+- `tools/train.py`, `tools/eval.py`, and `tools/render.py` now insert the repo root into `sys.path` on startup, so direct script invocation works without setting `PYTHONPATH` first.
 - Preprocess datasets: `python datasets/preprocess.py ...`
 - Extract sky/fine dynamic masks: `python datasets/tools/extract_masks.py ...`
 
