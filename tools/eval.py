@@ -6,6 +6,7 @@ import json
 import wandb
 import logging
 import argparse
+import numpy as np
 
 import torch
 from datasets.driving_dataset import DrivingDataset
@@ -22,17 +23,58 @@ logger = logging.getLogger()
 current_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
 
 
-def build_traj_kwargs(render_novel_cfg) -> dict:
-    traj_kwargs = {}
+def get_reference_cam_id(dataset) -> int:
+    return 1 if dataset.type == "argoverse" else 0
+
+
+def resolve_base_camera_id(dataset, render_novel_cfg) -> int:
     base_camera_id = render_novel_cfg.get("base_camera_id", None)
+    if base_camera_id is not None:
+        return base_camera_id
+    return get_reference_cam_id(dataset)
+
+
+def get_reference_poses(dataset, base_camera_id: int):
+    pose_dir = os.path.join(dataset.data_path, "ego_pose")
+    if not os.path.isdir(pose_dir):
+        pose_dir = os.path.join(dataset.data_path, "lidar_pose")
+    if not os.path.isdir(pose_dir):
+        return None
+
+    pose_files = sorted([name for name in os.listdir(pose_dir) if name.endswith(".txt")])
+    if not pose_files:
+        return None
+
+    pose_name = os.path.basename(pose_dir)
+    if pose_name == "lidar_pose" and dataset.type == "nuscenes":
+        frame_stem = os.path.splitext(pose_files[0])[0]
+        camera_start = np.loadtxt(
+            os.path.join(dataset.data_path, "extrinsics", f"{frame_stem}_{base_camera_id}.txt")
+        )
+        world_to_start = np.linalg.inv(camera_start)
+    else:
+        start_pose = np.loadtxt(os.path.join(pose_dir, pose_files[0]))
+        world_to_start = np.linalg.inv(start_pose)
+
+    poses = []
+    for pose_file in pose_files:
+        pose = np.loadtxt(os.path.join(pose_dir, pose_file))
+        poses.append(world_to_start @ pose)
+    return np.stack(poses, axis=0)
+
+
+def build_traj_kwargs(render_novel_cfg, dataset) -> dict:
+    traj_kwargs = {}
+    base_camera_id = resolve_base_camera_id(dataset, render_novel_cfg)
     lane_offset = render_novel_cfg.get("lane_offset", None)
+    reference_poses = get_reference_poses(dataset, base_camera_id)
     for traj_type in render_novel_cfg.get("traj_types", []):
-        if traj_type in {"raw_lane_offset_right", "raw_lane_offset_left"}:
-            kwargs = {}
-            if base_camera_id is not None:
-                kwargs["base_camera_id"] = base_camera_id
+        if traj_type in {"lane_offset_right", "lane_offset_left"}:
+            kwargs = {"base_camera_id": base_camera_id}
             if lane_offset is not None:
                 kwargs["lane_offset_meters"] = lane_offset
+            if reference_poses is not None:
+                kwargs["ego_poses"] = torch.from_numpy(reference_poses).float()
             traj_kwargs[traj_type] = kwargs
     return traj_kwargs
 
@@ -166,7 +208,8 @@ def do_evaluation(
     render_novel_cfg = cfg.render.get("render_novel", None)
     if render_novel_cfg is not None:
         logger.info("Rendering novel views...")
-        traj_kwargs = build_traj_kwargs(render_novel_cfg)
+        traj_kwargs = build_traj_kwargs(render_novel_cfg, dataset)
+        base_camera_id = resolve_base_camera_id(dataset, render_novel_cfg)
         render_traj = dataset.get_novel_render_traj(
             traj_types=render_novel_cfg.traj_types,
             target_frames=render_novel_cfg.get("frames", dataset.frame_num),
@@ -180,7 +223,7 @@ def do_evaluation(
             # Prepare rendering data
             render_data = dataset.prepare_novel_view_render_data(
                 traj,
-                cam_id=render_novel_cfg.get("base_camera_id", None),
+                cam_id=base_camera_id,
             )
             
             # Render and save video

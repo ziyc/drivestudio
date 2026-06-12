@@ -1,0 +1,17 @@
+render:
+  fps: 10
+  render_novel:
+    traj_types:
+      - front_center_interp
+      - lane_offset_left
+      - lane_offset_right
+    base_camera_id: 0
+    lane_offset: 3.5
+    frames: 199
+    fps: 10
+  export:
+    save_video: true
+    save_frames: true
+    save_gt_video: true
+    save_gt_frames: true
+    degrade_gt: false

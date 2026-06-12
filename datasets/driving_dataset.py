@@ -283,6 +283,7 @@ class DrivingDataset(SceneDataset):
             logger.info(f"For KITTI dataset, the trajectory length threshold is set \
                 to {traj_length_thres} to filter out noisy short trajectories of static objects")
 
+        smpl_human_all = getattr(self.pixel_source, "smpl_human_all", {})
         instance_dict = {}
         for fi in range(self.frame_num):
             lidar_dict = self.lidar_source.get_lidar_rays(fi)
@@ -309,7 +310,7 @@ class DrivingDataset(SceneDataset):
                     assert cur_node_type == "DeformableNodes", \
                         "Only exclude SMPL for DeformableNodes"
                     true_id = self.pixel_source.instances_true_id[ins_id].item()
-                    if true_id in self.pixel_source.smpl_human_all.keys():
+                    if true_id in smpl_human_all:
                         continue
 
                 if ins_id not in instance_dict:
@@ -397,6 +398,7 @@ class DrivingDataset(SceneDataset):
     
     def get_init_smpl_objects(self, only_moving: bool = False, traj_length_thres: float = 0.5):
         instance_dict = {}
+        smpl_human_all = getattr(self.pixel_source, "smpl_human_all", {})
         """
         instance_dict = {
             ins_id: {
@@ -412,19 +414,19 @@ class DrivingDataset(SceneDataset):
         
         for ins_id in range(self.instance_num):
             true_id = self.pixel_source.instances_true_id[ins_id].item()
-            if true_id in self.pixel_source.smpl_human_all.keys():
-                if self.pixel_source.smpl_human_all[true_id]["frame_valid"].sum() == 0:
+            if true_id in smpl_human_all:
+                if smpl_human_all[true_id]["frame_valid"].sum() == 0:
                     continue
-                smpl_trans = self.pixel_source.smpl_human_all[true_id]["smpl_trans"]
-                frame_info = self.pixel_source.smpl_human_all[true_id]["frame_valid"]
+                smpl_trans = smpl_human_all[true_id]["smpl_trans"]
+                frame_info = smpl_human_all[true_id]["frame_valid"]
                 if only_moving and traj_length_thres > 0:
                     # compute the distance between two consecutive frames
                     traj_length = smpl_trans[frame_info][1:] - smpl_trans[frame_info][:-1]
                     traj_length = torch.norm(traj_length, dim=-1).sum()
                     if traj_length < traj_length_thres:
                         continue
-                smpl_quats = self.pixel_source.smpl_human_all[true_id]["smpl_quats"]
-                smpl_betas = self.pixel_source.smpl_human_all[true_id]["smpl_betas"]
+                smpl_quats = smpl_human_all[true_id]["smpl_quats"]
+                smpl_betas = smpl_human_all[true_id]["smpl_betas"]
                 size = self.pixel_source.instances_size[ins_id]
                 # NOTE: set the first frame's betas as the betas of the instance
                 first_frame_betas = smpl_betas[frame_info][0]
@@ -708,7 +710,8 @@ class DrivingDataset(SceneDataset):
     def get_novel_render_traj(
         self,
         traj_types: List[str] = ["front_center_interp"],
-        target_frames: int = 100
+        target_frames: int | None = None,
+        traj_kwargs: Dict[str, dict] | None = None,
     ) -> Dict[str, torch.Tensor]:
         """
         Get multiple novel trajectories of the scene for rendering.
@@ -719,8 +722,8 @@ class DrivingDataset(SceneDataset):
                 - "front_center_interp": Interpolate key frames from the front center camera
                 - "s_curve": S-shaped trajectory using the front three cameras
                 - "three_key_poses": Creates a trajectory using three key poses from different cameras
-            target_frames: int
-                The total number of frames for each novel trajectory
+            target_frames: int | None
+                The total number of frames for each novel trajectory. If None, use all frames.
         
         Returns:
             Dict[str, torch.Tensor]: A dictionary where keys are trajectory types and values
@@ -731,18 +734,20 @@ class DrivingDataset(SceneDataset):
             per_cam_poses[cam_id] = self.pixel_source.camera_data[cam_id].cam_to_worlds
         
         novel_trajs = {}
+        traj_kwargs = {} if traj_kwargs is None else traj_kwargs
         for traj_type in traj_types:
             novel_trajs[traj_type] = get_interp_novel_trajectories(
                 self.type,
                 self.scene_idx,
                 per_cam_poses,
                 traj_type,
-                target_frames
+                target_frames,
+                traj_kwargs=traj_kwargs.get(traj_type),
             )
         
         return novel_trajs
 
-    def prepare_novel_view_render_data(self, traj: torch.Tensor) -> list:
+    def prepare_novel_view_render_data(self, traj: torch.Tensor, cam_id: int = None) -> list:
             """
             Prepare all necessary elements for novel view rendering.
 
@@ -755,4 +760,4 @@ class DrivingDataset(SceneDataset):
                     - image_infos: Image-related information (indices, normalized time, viewdirs, etc.)
             """
             # Call the PixelSource's method
-            return self.pixel_source.prepare_novel_view_render_data(self.type, traj)
+            return self.pixel_source.prepare_novel_view_render_data(self.type, traj, cam_id=cam_id)
