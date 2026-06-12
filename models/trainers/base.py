@@ -694,7 +694,7 @@ class BasicTrainer(nn.Module):
         Load model from checkpoint.
         """
         logger.info(f"Loading checkpoint from {ckpt_path}")
-        state_dict = torch.load(ckpt_path)
+        state_dict = torch.load(ckpt_path, weights_only=False)
         self.load_state_dict(state_dict, load_only_model=load_only_model, strict=True)
         
     def save_checkpoint(

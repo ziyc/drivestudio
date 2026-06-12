@@ -1067,7 +1067,7 @@ class ScenePixelSource(abc.ABC):
         """
         return self.data_cfg.sampler.buffer_downscale
     
-    def prepare_novel_view_render_data(self, dataset_type: str, traj: torch.Tensor) -> list:
+    def prepare_novel_view_render_data(self, dataset_type: str, traj: torch.Tensor, cam_id: int = None) -> list:
         """
         Prepare all necessary elements for novel view rendering.
 
@@ -1080,10 +1080,11 @@ class ScenePixelSource(abc.ABC):
                 - cam_infos: Camera information (extrinsics, intrinsics, image dimensions)
                 - image_infos: Image-related information (indices, normalized time, viewdirs, etc.)
         """
-        if dataset_type == "argoverse":
-            cam_id = 1  # Use cam_id 1 for Argoverse dataset
-        else:
-            cam_id = 0  # Use cam_id 0 for other datasets
+        if cam_id is None:
+            if dataset_type == "argoverse":
+                cam_id = 1  # Use cam_id 1 for Argoverse dataset
+            else:
+                cam_id = 0  # Use cam_id 0 for other datasets
         
         intrinsics = self.camera_data[cam_id].intrinsics[0]  # Assume intrinsics are constant across frames
         H, W = self.camera_data[cam_id].HEIGHT, self.camera_data[cam_id].WIDTH
