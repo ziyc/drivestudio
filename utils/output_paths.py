@@ -30,6 +30,21 @@ def build_auto_output_dir(output_root: str, command: str, *tags: str) -> str:
     return os.path.join(output_root, command, dirname)
 
 
+def build_train_output_dir(
+    output_root: str,
+    dataset: str,
+    scene_idx: int,
+    camera_list,
+    num_iters: int,
+    load_smpl: bool,
+) -> str:
+    scene_tag = f"scene{int(scene_idx):03d}"
+    cams_tag = f"{count_cameras(camera_list)}cams"
+    suffix_tags = [f"step{int(num_iters)}", "smpl" if load_smpl else "nosmpl"]
+    run_tag = join_tags([cams_tag, *suffix_tags])
+    return os.path.join(output_root, "train", _slugify(dataset), scene_tag, run_tag)
+
+
 def count_cameras(camera_list) -> int:
     try:
         return len(camera_list)

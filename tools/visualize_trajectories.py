@@ -247,16 +247,25 @@ def set_equal_axes(ax, points: np.ndarray) -> None:
     ax.set_box_aspect((1, 1, 1))
 
 
-def camera_forward_vectors(poses: np.ndarray, length: float = 6.0) -> np.ndarray:
+def _auto_arrow_length(positions: np.ndarray, fraction: float = 0.04) -> float:
+    diagonal = np.linalg.norm(np.ptp(positions, axis=0))
+    return max(diagonal * fraction, 1.0)
+
+
+def camera_forward_vectors(poses: np.ndarray, length: float = None) -> np.ndarray:
     forward = poses[:, :3, 2].copy()
     norms = np.linalg.norm(forward, axis=-1, keepdims=True)
     norms = np.clip(norms, 1e-8, None)
+    if length is None:
+        length = _auto_arrow_length(poses[:, :3, 3])
     return forward / norms * length
 
 
-def pose_forward_vector(pose: np.ndarray, length: float = 4.5) -> np.ndarray:
+def pose_forward_vector(pose: np.ndarray, length: float = None) -> np.ndarray:
     forward = pose[:3, 2].copy()
     norm = max(np.linalg.norm(forward), 1e-8)
+    if length is None:
+        length = _auto_arrow_length(pose[:3, 3].reshape(1, 3))
     return forward / norm * length
 
 
@@ -273,7 +282,10 @@ def plot_trajectory_3d(
     ax = fig.add_subplot(111, projection="3d")
 
     base_poses = camera_poses[base_camera_id]
-    all_points = [base_poses[:, :3, 3], trajectory[:, :3, 3]]
+    all_positions = base_poses[:, :3, 3]
+    arrow_length = _auto_arrow_length(all_positions)
+
+    all_points = [all_positions, trajectory[:, :3, 3]]
 
     ax.plot(
         base_poses[:, 0, 3],
@@ -286,7 +298,7 @@ def plot_trajectory_3d(
 
     stride = max(len(base_poses) // 10, 1)
     sampled_positions = base_poses[::stride, :3, 3]
-    sampled_forward = camera_forward_vectors(base_poses[::stride])
+    sampled_forward = camera_forward_vectors(base_poses[::stride], length=arrow_length)
     ax.scatter(
         sampled_positions[:, 0],
         sampled_positions[:, 1],
@@ -327,7 +339,7 @@ def plot_trajectory_3d(
         for idx, entry in enumerate(key_pose_entries):
             pose = entry["pose"].detach().cpu().numpy() if isinstance(entry["pose"], torch.Tensor) else entry["pose"]
             pos = pose[:3, 3]
-            forward = pose_forward_vector(pose)
+            forward = pose_forward_vector(pose, length=arrow_length * 0.75)
             ax.scatter(pos[0], pos[1], pos[2], color=key_colors[idx], s=70, edgecolors="black", linewidths=0.8)
             ax.quiver(
                 pos[0],

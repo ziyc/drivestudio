@@ -121,6 +121,8 @@ class DepthLoss(nn.Module):
         
         # cal valid mask to make sure gt_depth is valid
         valid_mask = (gt_depth > 0.01) & (gt_depth < max_depth) & (pred_depth > 0.0001)
+        if not valid_mask.any():
+            return pred_depth.new_zeros(1)
         
         # normalize depth to (0, 1)
         if self.normalize:

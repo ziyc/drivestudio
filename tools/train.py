@@ -1,6 +1,7 @@
 from omegaconf import OmegaConf
 import numpy as np
 import os
+import sys
 import time
 import wandb
 import random
@@ -8,10 +9,14 @@ import imageio
 import logging
 import argparse
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
 import torch
 from tools.eval import do_evaluation
 from utils.misc import import_str
-from utils.output_paths import build_auto_output_dir, count_cameras
+from utils.output_paths import build_train_output_dir
 from utils.backup import backup_project
 from utils.logging import MetricLogger, setup_logging
 from models.video_utils import render_images, save_videos
@@ -54,13 +59,13 @@ def setup(args):
     if args.manual_output:
         log_dir = os.path.join(args.output_root, args.project, args.run_name)
     else:
-        log_dir = build_auto_output_dir(
+        log_dir = build_train_output_dir(
             args.output_root,
-            "train",
             cfg.data.dataset,
-            f"s{cfg.data.scene_idx}",
-            f"cam{count_cameras(cfg.data.pixel_source.cameras)}",
-            f"step{cfg.trainer.optim.num_iters}",
+            cfg.data.scene_idx,
+            cfg.data.pixel_source.cameras,
+            cfg.trainer.optim.num_iters,
+            cfg.data.pixel_source.load_smpl,
         )
     
     # update config and create log dir
@@ -303,7 +308,7 @@ def main(args):
         #----------------------------     Saving     --------------------------------
         do_save = step > 0 and (
             (step % cfg.logging.saveckpt_freq == 0) or (step == trainer.num_iters)
-        ) and (args.resume_from is None)
+        )
         if do_save:  
             trainer.save_checkpoint(
                 log_dir=cfg.log_dir,
