@@ -363,7 +363,7 @@ wheels = [
 ]
 
 [[package]]
-name = "drivestudio-local"
+name = "drivestudio"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
