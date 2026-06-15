@@ -165,10 +165,18 @@ def _normalize(vectors: torch.Tensor) -> torch.Tensor:
     return vectors / norms
 
 
+def _trajectory_length(poses: torch.Tensor) -> torch.Tensor:
+    if poses.shape[0] < 2:
+        return poses.new_tensor(0.0)
+    deltas = poses[1:, :3, 3] - poses[:-1, :3, 3]
+    return torch.linalg.norm(deltas, dim=-1).sum()
+
+
 def _ego_frame_lane_offset(
     per_cam_poses: Dict[int, torch.Tensor],
     base_camera_id: int,
     lane_offset_meters: float,
+    lane_offset_ratio: float | None,
     ego_poses: torch.Tensor | None,
     offset_direction: torch.Tensor | None,
     target_frames: int,
@@ -203,7 +211,22 @@ def _ego_frame_lane_offset(
         lateral = _normalize(lateral.reshape(1, 3)).reshape(3)
         lateral = lateral * direction_sign
 
-    ego_to_virtual_camera[:3, 3] = ego_to_virtual_camera[:3, 3] + lane_offset_meters * lateral
+    effective_lane_offset = float(lane_offset_meters)
+    if lane_offset_ratio is not None:
+        effective_lane_offset = float(_trajectory_length(poses).item() * lane_offset_ratio)
+
+    offset_vector = effective_lane_offset * lateral
+    print(
+        "[lane_offset] "
+        f"base_camera={base_camera_id} "
+        f"meters={effective_lane_offset:.4f} "
+        f"ratio={lane_offset_ratio if lane_offset_ratio is not None else 'None'} "
+        f"lateral=[{lateral[0].item():.6f}, {lateral[1].item():.6f}, {lateral[2].item():.6f}] "
+        f"offset=[{offset_vector[0].item():.6f}, {offset_vector[1].item():.6f}, {offset_vector[2].item():.6f}] "
+        f"norm={torch.linalg.norm(offset_vector).item():.6f}"
+    )
+
+    ego_to_virtual_camera[:3, 3] = ego_to_virtual_camera[:3, 3] + offset_vector
 
     offset_poses = ego_poses @ ego_to_virtual_camera.unsqueeze(0)
     if target_frames is not None and target_frames != offset_poses.shape[0]:
@@ -232,6 +255,7 @@ def lane_offset_left(
     target_frames: int,
     base_camera_id: int = 0,
     lane_offset_meters: float = 3.5,
+    lane_offset_ratio: float | None = None,
     ego_poses: torch.Tensor | None = None,
     offset_direction: torch.Tensor | None = None,
 ) -> torch.Tensor:
@@ -239,6 +263,7 @@ def lane_offset_left(
         per_cam_poses=per_cam_poses,
         base_camera_id=base_camera_id,
         lane_offset_meters=lane_offset_meters,
+        lane_offset_ratio=lane_offset_ratio,
         ego_poses=ego_poses,
         offset_direction=offset_direction,
         target_frames=target_frames,
@@ -253,6 +278,7 @@ def lane_offset_right(
     target_frames: int,
     base_camera_id: int = 0,
     lane_offset_meters: float = 3.5,
+    lane_offset_ratio: float | None = None,
     ego_poses: torch.Tensor | None = None,
     offset_direction: torch.Tensor | None = None,
 ) -> torch.Tensor:
@@ -260,6 +286,7 @@ def lane_offset_right(
         per_cam_poses=per_cam_poses,
         base_camera_id=base_camera_id,
         lane_offset_meters=lane_offset_meters,
+        lane_offset_ratio=lane_offset_ratio,
         ego_poses=ego_poses,
         offset_direction=offset_direction,
         target_frames=target_frames,

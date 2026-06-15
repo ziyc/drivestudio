@@ -45,6 +45,12 @@ def parse_args():
     )
     parser.add_argument("--frames", type=int, default=None, help="optional output frame count; defaults to all frames")
     parser.add_argument("--lane_offset", type=float, default=3.5, help="lateral offset in meters")
+    parser.add_argument(
+        "--lane_offset_ratio",
+        type=float,
+        default=None,
+        help="lateral offset as a fraction of base-camera trajectory length",
+    )
     parser.add_argument("--base_camera_id", type=int, default=0, help="base camera id for offset trajectories")
     parser.add_argument(
         "--offset_direction",
@@ -168,6 +174,8 @@ def build_traj_kwargs(args, ego_poses: np.ndarray) -> dict[str, dict]:
                 "lane_offset_meters": args.lane_offset,
                 "ego_poses": torch.from_numpy(ego_poses).float(),
             }
+            if args.lane_offset_ratio is not None:
+                traj_kwargs["lane_offset_ratio"] = args.lane_offset_ratio
             if offset_direction is not None:
                 traj_kwargs["offset_direction"] = offset_direction
             kwargs[traj_type] = traj_kwargs
@@ -369,6 +377,22 @@ def plot_trajectory_3d(
     plt.close(fig)
 
 
+def summarize_offset(base_poses: np.ndarray, trajectory: np.ndarray) -> str:
+    if base_poses.shape[0] != trajectory.shape[0]:
+        return "offset stats unavailable: frame count mismatch"
+
+    delta = trajectory[:, :3, 3] - base_poses[:, :3, 3]
+    norms = np.linalg.norm(delta, axis=-1)
+    start = delta[0]
+    end = delta[-1]
+    return (
+        "offset stats: "
+        f"start=[{start[0]:.6f}, {start[1]:.6f}, {start[2]:.6f}] "
+        f"end=[{end[0]:.6f}, {end[1]:.6f}, {end[2]:.6f}] "
+        f"mean_norm={norms.mean():.6f} min_norm={norms.min():.6f} max_norm={norms.max():.6f}"
+    )
+
+
 def main():
     args = parse_args()
     cfg = load_cfg(args)
@@ -408,7 +432,10 @@ def main():
 
         traj_tag = traj_type
         if traj_type in {"lane_offset_left", "lane_offset_right"}:
-            traj_tag = f"{traj_type}@{args.lane_offset:g}"
+            if args.lane_offset_ratio is not None:
+                traj_tag = f"{traj_type}@ratio{args.lane_offset_ratio:g}"
+            else:
+                traj_tag = f"{traj_type}@{args.lane_offset:g}"
 
         output_dir = os.path.join(
             args.output_root,
@@ -416,6 +443,15 @@ def main():
             f"{cfg.data.dataset}-s{cfg.data.scene_idx}-{traj_tag}",
         )
         os.makedirs(output_dir, exist_ok=True)
+
+        base_poses_np = camera_poses_np[args.base_camera_id]
+        np.save(os.path.join(output_dir, "trajectory.npy"), trajectory_np)
+        np.save(os.path.join(output_dir, "base_camera.npy"), base_poses_np)
+        if base_poses_np.shape[0] == trajectory_np.shape[0]:
+            np.save(
+                os.path.join(output_dir, "offset_delta.npy"),
+                trajectory_np[:, :3, 3] - base_poses_np[:, :3, 3],
+            )
 
         plot_trajectory_3d(
             ego_poses=ego_poses,
@@ -427,6 +463,7 @@ def main():
             output_path=os.path.join(output_dir, "trajectory_3d.png"),
         )
 
+        print(summarize_offset(base_poses_np, trajectory_np))
         print(f"saved: {output_dir}")
 
 
