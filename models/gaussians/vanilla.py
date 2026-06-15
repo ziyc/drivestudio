@@ -82,7 +82,8 @@ class VanillaGaussians(nn.Module):
         distances, _ = k_nearest_sklearn(self._means.data, 3)
         distances = torch.from_numpy(distances)
         # find the average of the three nearest neighbors for each point and use that as the scale
-        avg_dist = distances.mean(dim=-1, keepdim=True).to(self.device)
+        # Guard against duplicated initialization points producing zero neighbor distances.
+        avg_dist = distances.mean(dim=-1, keepdim=True).to(self.device).clamp_min(1e-12)
         if self.ball_gaussians:
             self._scales = Parameter(torch.log(avg_dist.repeat(1, 1)))
         else:
@@ -423,7 +424,11 @@ class VanillaGaussians(nn.Module):
             if self.step % step_interval == 0:
                 # scale regularization
                 scale_exp = self.get_scaling
-                scale_reg = torch.maximum(scale_exp.amax(dim=-1) / scale_exp.amin(dim=-1), torch.tensor(max_gauss_ratio)) - max_gauss_ratio
+                min_scale = scale_exp.amin(dim=-1).clamp_min(1e-12)
+                scale_reg = torch.maximum(
+                    scale_exp.amax(dim=-1) / min_scale,
+                    torch.tensor(max_gauss_ratio, device=scale_exp.device),
+                ) - max_gauss_ratio
                 scale_reg = scale_reg.mean() * w
                 loss_dict["sharp_shape_reg"] = scale_reg
 
