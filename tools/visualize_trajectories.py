@@ -168,15 +168,16 @@ def build_traj_kwargs(args, ego_poses: np.ndarray) -> dict[str, dict]:
     kwargs = {}
     offset_direction = parse_offset_direction(args.offset_direction)
     for traj_type in args.traj_types:
-        if traj_type in {"lane_offset_left", "lane_offset_right"}:
+        if traj_type in {"ego_raw", "lane_offset_left", "lane_offset_right"}:
             traj_kwargs = {
                 "base_camera_id": args.base_camera_id,
-                "lane_offset_meters": args.lane_offset,
-                "ego_poses": torch.from_numpy(ego_poses).float(),
             }
+            if traj_type in {"lane_offset_left", "lane_offset_right"}:
+                traj_kwargs["lane_offset_meters"] = args.lane_offset
+                traj_kwargs["ego_poses"] = torch.from_numpy(ego_poses).float()
             if args.lane_offset_ratio is not None:
                 traj_kwargs["lane_offset_ratio"] = args.lane_offset_ratio
-            if offset_direction is not None:
+            if traj_type in {"lane_offset_left", "lane_offset_right"} and offset_direction is not None:
                 traj_kwargs["offset_direction"] = offset_direction
             kwargs[traj_type] = traj_kwargs
     return kwargs

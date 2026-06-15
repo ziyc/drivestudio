@@ -75,13 +75,13 @@ def build_traj_kwargs(render_novel_cfg, dataset) -> dict:
     lane_offset_ratio = render_novel_cfg.get("lane_offset_ratio", None)
     reference_poses = get_reference_poses(dataset, base_camera_id)
     for traj_type in render_novel_cfg.get("traj_types", []):
-        if traj_type in {"lane_offset_right", "lane_offset_left"}:
+        if traj_type in {"ego_raw", "lane_offset_right", "lane_offset_left"}:
             kwargs = {"base_camera_id": base_camera_id}
             if lane_offset is not None:
                 kwargs["lane_offset_meters"] = lane_offset
             if lane_offset_ratio is not None:
                 kwargs["lane_offset_ratio"] = lane_offset_ratio
-            if reference_poses is not None:
+            if traj_type in {"lane_offset_right", "lane_offset_left"} and reference_poses is not None:
                 kwargs["ego_poses"] = torch.from_numpy(reference_poses).float()
             traj_kwargs[traj_type] = kwargs
     return traj_kwargs

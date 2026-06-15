@@ -271,13 +271,13 @@ def build_traj_kwargs(
 ) -> dict[str, dict]:
     traj_kwargs = {}
     for traj_type in traj_types:
-        if traj_type in {"lane_offset_right", "lane_offset_left"}:
+        if traj_type in {"ego_raw", "lane_offset_right", "lane_offset_left"}:
             kwargs = {"base_camera_id": base_camera_id}
             if lane_offset is not None:
                 kwargs["lane_offset_meters"] = lane_offset
             if lane_offset_ratio is not None:
                 kwargs["lane_offset_ratio"] = lane_offset_ratio
-            if reference_poses is not None:
+            if traj_type in {"lane_offset_right", "lane_offset_left"} and reference_poses is not None:
                 kwargs["ego_poses"] = torch.from_numpy(reference_poses).float()
             traj_kwargs[traj_type] = kwargs
     return traj_kwargs
@@ -465,9 +465,10 @@ def main():
 
     trainer = build_trainer(cfg, dataset)
     trainer.resume_from_checkpoint(ckpt_path=args.resume_from, load_only_model=True)
+    traj_device = dataset.pixel_source.device
 
     for traj_type, traj in render_traj.items():
-        render_data = dataset.prepare_novel_view_render_data(traj, cam_id=base_camera_id)
+        render_data = dataset.prepare_novel_view_render_data(traj.to(traj_device), cam_id=base_camera_id)
 
         render_novel_video(
             trainer,
