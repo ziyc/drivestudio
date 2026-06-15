@@ -1,0 +1,18 @@
+# Generic override config for tools/render.py or tools/eval.py novel-view tasks.
+# Usage examples:
+#   uv run python tools/render.py --resume_from <ckpt> --config_file configs/render/novel_view.yaml
+#   uv run python tools/eval.py --resume_from <ckpt> render.render_novel.traj_types=[lane_offset_left]
+
+render:
+  fps: 10
+  render_full: false
+  render_test: false
+  render_novel:
+    traj_types:
+      - front_center_interp
+    frames: null
+    fps: 24
+    base_camera_id: 0
+    lane_offset: null
+    lane_offset_ratio: null
+  degradation: null

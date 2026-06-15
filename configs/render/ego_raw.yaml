@@ -1,0 +1,22 @@
+# Cosmos dataset export config for `tools/build_cosmos_dataset.py`.
+# This keeps the original trajectory (`ego_raw`) and proportional 16:9 export.
+# Structural degradation for `render/light/medium/heavy` is controlled by:
+# - which checkpoint you pass
+# - gaussian dropping inside `tools/build_cosmos_dataset.py`
+# not by image-space blur/noise/JPEG settings here.
+
+render:
+  fps: 10
+  output_size: [1280, 704]
+  output_size_mode: cover_crop
+  render_full: false
+  render_test: false
+  render_novel:
+    traj_types:
+      - ego_raw
+    frames: 93
+    fps: 10
+    base_camera_id: 0
+    lane_offset: null
+    lane_offset_ratio: null
+  degradation: null
