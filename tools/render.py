@@ -187,11 +187,9 @@ def render_novel_video(
     degradation_cfg=None,
     output_size=None,
     output_size_mode: str = "stretch",
-    clean_save_path: str | None = None,
 ) -> None:
     trainer.set_eval()
     writer = None
-    clean_writer = None
     with torch.no_grad():
         for frame_data in render_data:
             for key, value in frame_data["cam_infos"].items():
@@ -205,14 +203,6 @@ def render_novel_video(
                 novel_view=True,
             )
             rgb = outputs["rgb"].detach().cpu().numpy().clip(min=1.0e-6, max=1 - 1.0e-6)
-            clean_rgb_uint8 = _to_uint8(rgb)
-            clean_rgb_uint8 = maybe_resize_frame(clean_rgb_uint8, output_size, output_size_mode)
-            clean_rgb_uint8 = maybe_pad_frame(clean_rgb_uint8)
-            if clean_save_path is not None:
-                if clean_writer is None:
-                    clean_writer = imageio.get_writer(clean_save_path, mode="I", fps=fps, macro_block_size=None)
-                clean_writer.append_data(clean_rgb_uint8)
-
             rgb_uint8 = apply_render_degradation(rgb, degradation_cfg)
             rgb_uint8 = maybe_resize_frame(rgb_uint8, output_size, output_size_mode)
             rgb_uint8 = maybe_pad_frame(rgb_uint8)
@@ -221,9 +211,6 @@ def render_novel_video(
             writer.append_data(rgb_uint8)
     if writer is not None:
         writer.close()
-    if clean_writer is not None:
-        clean_writer.close()
-        print(f"Clean render video saved to {clean_save_path}")
     print(f"Video saved to {save_path}")
 
 
@@ -478,7 +465,6 @@ def main():
             degradation_cfg=degradation_cfg,
             output_size=output_size,
             output_size_mode=output_size_mode,
-            clean_save_path=os.path.join(output_dir, f"{traj_type}_render.mp4"),
         )
         save_gt_video(
             dataset,
