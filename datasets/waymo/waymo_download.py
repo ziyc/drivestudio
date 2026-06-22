@@ -72,16 +72,55 @@ if __name__ == "__main__":
         "--scene_ids", type=int, nargs="+", help="scene ids to download"
     )
     parser.add_argument(
-        "--split_file", type=str, default=None, help="split file in data/waymo_splits"
+        "--scene_file", type=str, default=None,
+        help="simple scene list: one scene ID per line, # comments ignored",
     )
+    parser.add_argument(
+        "--split_file", type=str, default=None,
+        help="csv-style split file (scene_id,seg_name,...) with header",
+    )
+    parser.add_argument(
+        "--processed_root", type=str, default="data/waymo/processed/training",
+        help="check this dir for already-processed scenes to skip",
+    )
+    parser.add_argument("--force", action="store_true", help="re-download even if processed dir exists")
     args = parser.parse_args()
     os.makedirs(args.target_dir, exist_ok=True)
     total_list = open("data/waymo_train_list.txt", "r").readlines()
-    if args.split_file is None:
-        file_names = [total_list[i].strip() for i in args.scene_ids]
+
+    requested_ids = []
+    if args.scene_ids is not None:
+        requested_ids = list(args.scene_ids)
+    elif args.scene_file is not None:
+        for line in open(args.scene_file):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "," in line:
+                requested_ids.append(int(line.split(",")[0]))
+            else:
+                requested_ids.append(int(line))
+    elif args.split_file is not None:
+        for line in open(args.split_file).readlines()[1:]:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            requested_ids.append(int(line.split(",")[0]))
     else:
-        # parse the split file
-        split_file = open(args.split_file, "r").readlines()[1:]
-        scene_ids = [int(line.strip().split(",")[0]) for line in split_file]
-        file_names = [total_list[i].strip() for i in scene_ids]
+        print("ERROR: provide --scene_ids, --scene_file, or --split_file")
+        exit(1)
+
+    # filter already-processed scenes
+    file_names = []
+    for i in requested_ids:
+        scene_dir = os.path.join(args.processed_root, f"{i:03d}")
+        if not args.force and os.path.isdir(scene_dir):
+            print(f"  skip scene {i}: already processed at {scene_dir}")
+            continue
+        file_names.append(total_list[i].strip())
+
+    if not file_names:
+        print("All requested scenes already processed. Nothing to download.")
+        exit(0)
+
     download_files(file_names, args.target_dir)
