@@ -4,3 +4,6 @@
 [submodule "third_party/Cosmos-Drive-Dreams"]
 	path = third_party/Cosmos-Drive-Dreams
 	url = https://github.com/nv-tlabs/Cosmos-Drive-Dreams.git
+[submodule "third_party/faith-fusion"]
+	path = third_party/faith-fusion
+	url = git@github.com:wangyuanbiubiubiu/FaithFusion.git
