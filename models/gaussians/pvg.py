@@ -413,6 +413,7 @@ class PeriodicVibrationGaussians(VanillaGaussians):
             _rgbs=actovated_colors[filter_mask],
             _scales=activated_scales[filter_mask],
             _quats=activated_rotations[filter_mask],
+            _shs=colors[filter_mask],
         )
         
         # check nan and inf in gs_dict

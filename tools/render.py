@@ -2,8 +2,10 @@
 
 import argparse
 import os
+import shutil
 import sys
 from io import BytesIO
+from pathlib import Path
 
 import imageio
 import numpy as np
@@ -78,6 +80,23 @@ def parse_args():
         type=int,
         default=None,
         help="base camera id for novel rendering; defaults to the repo reference camera",
+    )
+    parser.add_argument(
+        "--export_eig",
+        action="store_true",
+        help="also export native OmniRe EIG masks for the rendered trajectories",
+    )
+    parser.add_argument(
+        "--eig_gain_th",
+        type=float,
+        default=1.0,
+        help="clamp/normalize gain map by this threshold before writing eig mp4",
+    )
+    parser.add_argument(
+        "--eig_binary_th",
+        type=float,
+        default=0.5,
+        help="threshold on normalized eig mask for binary mask export",
     )
     parser.add_argument(
         "--list_traj_types",
@@ -328,6 +347,158 @@ def build_trainer(cfg, dataset):
     )
 
 
+def gain_tensor_to_mask(gain: torch.Tensor, gain_th: float) -> np.ndarray:
+    gain = gain.detach().float().cpu()
+    no_opacity = gain > 99.0
+    gain = torch.clamp(gain, max=float(gain_th)) / float(gain_th)
+    gain[no_opacity] = 1.0
+    return (gain.numpy() * 255.0).clip(0, 255).astype(np.uint8)
+
+
+def colorize_mask(mask_uint8: np.ndarray) -> np.ndarray:
+    mask = mask_uint8.astype(np.float32) / 255.0
+    r = np.clip(1.5 * mask - 0.2, 0.0, 1.0)
+    g = np.clip(1.5 - np.abs(2.0 * mask - 1.0) * 2.0, 0.0, 1.0)
+    b = np.clip(1.2 - 1.5 * mask, 0.0, 1.0)
+    heatmap = np.stack([r, g, b], axis=-1)
+    return (heatmap * 255.0).astype(np.uint8)
+
+
+def make_overlay(rgb_uint8: np.ndarray, heatmap_uint8: np.ndarray, alpha: float = 0.4) -> np.ndarray:
+    blended = rgb_uint8.astype(np.float32) * (1.0 - alpha) + heatmap_uint8.astype(np.float32) * alpha
+    return blended.clip(0, 255).astype(np.uint8)
+
+
+def make_binary_mask(mask_uint8: np.ndarray, binary_th: float) -> np.ndarray:
+    threshold = int(np.clip(binary_th, 0.0, 1.0) * 255.0)
+    return np.where(mask_uint8 >= threshold, 255, 0).astype(np.uint8)
+
+
+def accumulate_train_eig(trainer, dataset) -> None:
+    trainer.set_train()
+    trainer.H_per_gaussian = {}
+    trainer.H_per_gaussian_full = None
+    trainer.I_train = None
+    trainer.I_train_sqrt = None
+    trainer.initialize_optimizer_uncertainty()
+    camera_downscale = trainer._get_downscale_factor()
+
+    for i in range(len(dataset.train_image_set)):
+        image_infos, cam_infos = dataset.train_image_set.get_image(i, camera_downscale)
+        for k, v in image_infos.items():
+            if isinstance(v, torch.Tensor):
+                image_infos[k] = v.cuda(non_blocking=True)
+        for k, v in cam_infos.items():
+            if isinstance(v, torch.Tensor):
+                cam_infos[k] = v.cuda(non_blocking=True)
+        trainer(
+            image_infos=image_infos,
+            camera_infos=cam_infos,
+            compute_uncertainty=True,
+            is_train_set=True,
+        )
+
+    reg_lambda = 1e-6
+    trainer.H_per_gaussian_full = next(iter(trainer.H_per_gaussian.values())).clone()
+    first_key = next(iter(trainer.H_per_gaussian.keys()))
+    for key, tensor in trainer.H_per_gaussian.items():
+        if key != first_key:
+            trainer.H_per_gaussian_full += tensor
+    trainer.I_train = torch.reciprocal(trainer.H_per_gaussian_full + reg_lambda)
+    trainer.I_train_sqrt = torch.sqrt(trainer.I_train)
+
+
+def export_eig_video(
+    trainer,
+    render_data: list,
+    output_dir: str,
+    fps: int,
+    gain_th: float,
+    binary_th: float,
+    output_size=None,
+    output_size_mode: str = "stretch",
+):
+    eig_dir = Path(output_dir)
+    gain_dir = eig_dir / "gain_pt"
+    mask_dir = eig_dir / "mask_frames"
+    binary_dir = eig_dir / "binary_mask_frames"
+    rgb_dir = eig_dir / "rgb_frames"
+    for path in [eig_dir, gain_dir, mask_dir, binary_dir, rgb_dir]:
+        path.mkdir(parents=True, exist_ok=True)
+
+    rgb_writer = None
+    mask_writer = None
+    binary_writer = None
+    heatmap_writer = None
+    compare_writer = None
+    overlay_writer = None
+    trainer.set_eval()
+    for idx, frame_data in enumerate(render_data):
+        for key, value in frame_data["cam_infos"].items():
+            if isinstance(value, torch.Tensor):
+                frame_data["cam_infos"][key] = value.cuda(non_blocking=True)
+        for key, value in frame_data["image_infos"].items():
+            if isinstance(value, torch.Tensor):
+                frame_data["image_infos"][key] = value.cuda(non_blocking=True)
+
+        outputs = trainer(
+            image_infos=frame_data["image_infos"],
+            camera_infos=frame_data["cam_infos"],
+            novel_view=True,
+            compute_uncertainty=True,
+            is_train_set=False,
+        )
+        rgb = outputs["rgb"].detach().cpu().numpy().clip(min=1.0e-6, max=1 - 1.0e-6)
+        rgb_uint8 = _to_uint8(rgb)
+        rgb_uint8 = maybe_resize_frame(rgb_uint8, output_size, output_size_mode)
+        rgb_uint8 = maybe_pad_frame(rgb_uint8)
+
+        gain_map = torch.log(outputs["gain_map"].detach() + 1.0) + 1e-9
+        opacity_filter = outputs["opacity"].detach() < 0.1
+        gain_map[opacity_filter[:, :, 0]] = 100.0
+        torch.save(gain_map.cpu(), gain_dir / f"gain_{idx}.pt")
+
+        mask_uint8 = gain_tensor_to_mask(gain_map, gain_th)
+        mask_uint8 = maybe_resize_frame(mask_uint8, output_size, output_size_mode)
+        mask_uint8 = maybe_pad_frame(mask_uint8)
+        binary_uint8 = make_binary_mask(mask_uint8, binary_th)
+        heatmap_uint8 = colorize_mask(mask_uint8)
+        compare_uint8 = np.concatenate([rgb_uint8, heatmap_uint8], axis=1)
+        overlay_uint8 = make_overlay(rgb_uint8, heatmap_uint8)
+
+        Image.fromarray(rgb_uint8).save(rgb_dir / f"rgb_{idx}.png")
+        Image.fromarray(mask_uint8, mode="L").save(mask_dir / f"mask_{idx}.png")
+        Image.fromarray(binary_uint8, mode="L").save(binary_dir / f"mask_{idx}.png")
+        Image.fromarray(heatmap_uint8).save(eig_dir / f"heatmap_{idx}.png")
+
+        if rgb_writer is None:
+            rgb_writer = imageio.get_writer((eig_dir / "rgb.mp4").as_posix(), mode="I", fps=fps, macro_block_size=None)
+            mask_writer = imageio.get_writer((eig_dir / "mask.mp4").as_posix(), mode="I", fps=fps, macro_block_size=None)
+            binary_writer = imageio.get_writer((eig_dir / "binary_mask.mp4").as_posix(), mode="I", fps=fps, macro_block_size=None)
+            heatmap_writer = imageio.get_writer((eig_dir / "heatmap.mp4").as_posix(), mode="I", fps=fps, macro_block_size=None)
+            compare_writer = imageio.get_writer((eig_dir / "compare.mp4").as_posix(), mode="I", fps=fps, macro_block_size=None)
+            overlay_writer = imageio.get_writer((eig_dir / "overlay.mp4").as_posix(), mode="I", fps=fps, macro_block_size=None)
+        rgb_writer.append_data(rgb_uint8)
+        mask_writer.append_data(mask_uint8)
+        binary_writer.append_data(binary_uint8)
+        heatmap_writer.append_data(heatmap_uint8)
+        compare_writer.append_data(compare_uint8)
+        overlay_writer.append_data(overlay_uint8)
+
+    if rgb_writer is not None:
+        rgb_writer.close()
+    if mask_writer is not None:
+        mask_writer.close()
+    if binary_writer is not None:
+        binary_writer.close()
+    if heatmap_writer is not None:
+        heatmap_writer.close()
+    if compare_writer is not None:
+        compare_writer.close()
+    if overlay_writer is not None:
+        overlay_writer.close()
+
+
 def main():
     args = parse_args()
 
@@ -454,6 +625,9 @@ def main():
     trainer.resume_from_checkpoint(ckpt_path=args.resume_from, load_only_model=True)
     traj_device = dataset.pixel_source.device
 
+    if args.export_eig:
+        accumulate_train_eig(trainer, dataset)
+
     for traj_type, traj in render_traj.items():
         render_data = dataset.prepare_novel_view_render_data(traj.to(traj_device), cam_id=base_camera_id)
 
@@ -475,5 +649,20 @@ def main():
             output_size=output_size,
             output_size_mode=output_size_mode,
         )
+        if args.export_eig:
+            eig_output_dir = os.path.join(output_dir, f"{traj_type}_eig")
+            export_eig_video(
+                trainer,
+                render_data,
+                eig_output_dir,
+                fps=fps,
+                gain_th=args.eig_gain_th,
+                binary_th=args.eig_binary_th,
+                output_size=output_size,
+                output_size_mode=output_size_mode,
+            )
+            shutil.copy2(os.path.join(eig_output_dir, "mask.mp4"), os.path.join(output_dir, f"{traj_type}_eig.mp4"))
+            shutil.copy2(os.path.join(eig_output_dir, "binary_mask.mp4"), os.path.join(output_dir, f"{traj_type}_eig_binary.mp4"))
+
 if __name__ == "__main__":
     main()

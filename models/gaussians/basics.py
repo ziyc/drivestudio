@@ -124,6 +124,7 @@ class dataclass_gs:
     _rgbs: torch.Tensor
     _scales: torch.Tensor
     _quats: torch.Tensor
+    _shs: torch.Tensor
     detach_keys: List[str]
     extras: Optional[Dict[str, torch.Tensor]] = None
     def set_grad_controller(self, detach_keys):
@@ -158,6 +159,13 @@ class dataclass_gs:
             return self._quats.detach()
         else:
             return self._quats
+
+    @property
+    def shs(self):
+        if "shs" in self.detach_keys:
+            return self._shs.detach()
+        else:
+            return self._shs
         
 def remove_from_optim(optimizer, deleted_mask, param_dict):
     """removes the deleted_mask from the optimizer provided"""

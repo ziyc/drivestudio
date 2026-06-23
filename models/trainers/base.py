@@ -17,6 +17,7 @@ from torchmetrics.image import PeakSignalNoiseRatio
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 from models.gaussians.basics import *
+from models.trainers.origin_gs_uncertainty_renderer import modified_render
 
 logger = logging.getLogger()
 
@@ -105,6 +106,12 @@ class BasicTrainer(nn.Module):
         self._init_models()
         self.pts_labels = None # will be overwritten in forward
         self.render_dynamic_mask = False
+        self.H_per_gaussian = {}
+        self.H_per_gaussian_full = None
+        self.I_train = None
+        self.I_train_sqrt = None
+        self.sky_masks = None
+        self.uncertainty_optimizer = None
         
         # init losses fn
         self._init_losses()
@@ -226,6 +233,31 @@ class BasicTrainer(nn.Module):
         self.optimizer = torch.optim.Adam(groups, lr=0.0, eps=1e-15)
         self.lr_schedulers = lr_schedulers
         self.grad_scaler = torch.cuda.amp.GradScaler(enabled=self.optim_general.get("use_grad_scaler", False))
+
+    def initialize_optimizer_uncertainty(self) -> None:
+        param_groups = {}
+        for class_name in self.gaussian_classes.keys():
+            model = self.models[class_name]
+            param_groups.update(model.get_param_groups())
+
+        groups = []
+        for params_name, params in param_groups.items():
+            class_name = params_name.split("#")[0]
+            component_name = params_name.split("#")[1]
+            class_cfg = self.model_config.get(class_name)
+            class_optim_cfg = class_cfg["optim"]
+            raw_optim_cfg = class_optim_cfg.get(component_name, None)
+            lr_scale_factor = raw_optim_cfg.get("scale_factor", 1.0)
+            if isinstance(lr_scale_factor, str) and lr_scale_factor == "scene_radius":
+                lr_scale_factor = self.scene_radius
+            groups.append({
+                "params": params,
+                "name": params_name,
+                "lr": raw_optim_cfg.get("lr", 0.0005) * lr_scale_factor,
+                "eps": raw_optim_cfg.get("eps", 1.0e-15),
+                "weight_decay": raw_optim_cfg.get("weight_decay", 0),
+            })
+        self.uncertainty_optimizer = torch.optim.SGD(groups, lr=0.0)
     
     def _init_losses(self) -> None:
         sky_opacity_loss_fn = None
@@ -350,6 +382,7 @@ class BasicTrainer(nn.Module):
             "_quats": [],
             "_rgbs": [],
             "_opacities": [],
+            "_shs": [],
             "class_labels": [],
         }
         for class_name in self.gaussian_classes.keys():
@@ -376,6 +409,7 @@ class BasicTrainer(nn.Module):
             _quats=gs_dict["_quats"],
             _rgbs=gs_dict["_rgbs"],
             _opacities=gs_dict["_opacities"],
+            _shs=gs_dict["_shs"],
             detach_keys=[],    # if "means" in detach_keys, then the means will be detached
             extras=None        # to save some extra information (TODO) more flexible way
         )
@@ -388,7 +422,8 @@ class BasicTrainer(nn.Module):
         cam: dataclass_camera,
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
-    
+        gaussian_mask = kwargs.pop("gaussian_mask", None)
+
         def render_fn(opaticy_mask=None, return_info=False):
             renders, alphas, info = rasterization(
                 means=gs.means,
@@ -419,7 +454,7 @@ class BasicTrainer(nn.Module):
                 return torch.clamp(rendered_rgb, max=1.0), rendered_depth, alphas[..., None], info
         
         # render rgb and opacity
-        rgb, depth, opacity, self.info = render_fn(return_info=True)
+        rgb, depth, opacity, self.info = render_fn(opaticy_mask=gaussian_mask, return_info=True)
         results = {
             "rgb_gaussians": rgb,
             "depth": depth, 
@@ -429,6 +464,91 @@ class BasicTrainer(nn.Module):
         if self.training:
             self.info["means2d"].retain_grad()
         
+        return results, render_fn
+
+    def render_uncertainly_gaussians(
+        self,
+        gs: dataclass_gs,
+        cam: dataclass_camera,
+        **kwargs,
+    ) -> Dict[str, torch.Tensor]:
+        def render_fn(opacity_mask=None, override_color=None, return_output_params=False):
+            render_pkg = modified_render(
+                gs,
+                cam,
+                opacity_mask,
+                kwargs["is_train_set"],
+                override_color,
+                kwargs["near_plane"],
+                kwargs["far_plane"],
+            )
+            rendered_rgb = render_pkg["render"].permute(1, 2, 0)
+            rendered_depth = render_pkg["depth"][..., None]
+            alphas = render_pkg["opacity"][..., None]
+            params_output = render_pkg["params_output"]
+            hit_cnt = render_pkg["pixel_gaussian_counter"]
+            if return_output_params:
+                return rendered_rgb, rendered_depth, alphas, params_output, hit_cnt
+            return rendered_rgb, rendered_depth, alphas, hit_cnt
+
+        rgb, depth, opacity, params_output, hit_cnt = render_fn(return_output_params=True)
+        results = {"rgb_gaussians": rgb, "depth": depth, "opacity": opacity}
+
+        if kwargs["is_train_set"]:
+            grad_tensor = torch.ones_like(rgb)
+            if self.sky_masks is not None:
+                grad_tensor = grad_tensor * (self.sky_masks < 0.9).unsqueeze(-1).expand(grad_tensor.shape)
+            min_hit = 1e-6
+            hit_cnt_safe = torch.max(hit_cnt, torch.tensor(min_hit, device=hit_cnt.device)).unsqueeze(-1).expand(grad_tensor.shape)
+            grad_tensor = grad_tensor / hit_cnt_safe
+            rgb.backward(gradient=grad_tensor)
+
+            used_params_list = ["means", "rotations", "scales", "opacities", "shs"]
+            if len(self.H_per_gaussian) == 0:
+                for params_name in used_params_list:
+                    param_tensor = params_output[params_name]
+                    self.H_per_gaussian[params_name] = torch.zeros(
+                        param_tensor.shape[0], device=param_tensor.device, dtype=param_tensor.dtype
+                    )
+            for params_name in self.H_per_gaussian.keys():
+                grad = params_output[params_name].grad.detach().reshape(params_output[params_name].shape[0], -1)
+                self.H_per_gaussian[params_name] += grad.sum(dim=1)
+
+            if self.uncertainty_optimizer is not None:
+                self.uncertainty_optimizer.zero_grad(set_to_none=True)
+        else:
+            rgb.backward(gradient=torch.ones_like(rgb))
+            h_view = {k: torch.zeros_like(v) for k, v in self.H_per_gaussian.items()}
+            for params_name in self.H_per_gaussian.keys():
+                grad = params_output[params_name].grad.detach().reshape(params_output[params_name].shape[0], -1)
+                h_view[params_name] += grad.sum(dim=1)
+
+            h_view_total = next(iter(h_view.values())).clone()
+            for key, tensor in h_view.items():
+                if key != next(iter(h_view.keys())):
+                    h_view_total += tensor
+            i_acq = h_view_total * self.I_train
+            hessian_color = torch.cat(
+                [
+                    self.H_per_gaussian_full.unsqueeze(1),
+                    self.I_train_sqrt.unsqueeze(1),
+                    i_acq.unsqueeze(1),
+                ],
+                dim=1,
+            )
+            if self.uncertainty_optimizer is not None:
+                self.uncertainty_optimizer.zero_grad(set_to_none=True)
+
+            uncertainty_map_full, _, _, hit_cnt = render_fn(override_color=hessian_color)
+            mask_filter = opacity[:, :, 0] > 0.1
+            uncertainty_map = uncertainty_map_full[:, :, 0] * mask_filter
+            cov_map = uncertainty_map_full[:, :, 1] * mask_filter
+            gain_map = uncertainty_map_full[:, :, 2] * mask_filter
+            min_hit = 1e-6
+            hit_cnt_safe = torch.max(hit_cnt, torch.tensor(min_hit, device=hit_cnt.device))
+            results["uncertainty_map"] = uncertainty_map
+            results["cov_map"] = cov_map
+            results["gain_map"] = gain_map / hit_cnt_safe / 1000.0
         return results, render_fn
 
     def affine_transformation(
@@ -747,6 +867,7 @@ class BasicTrainer(nn.Module):
             "_quats": [],
             "_rgbs": [],
             "_opacities": [],
+            "_shs": [],
         }
         for class_name in ["Background"]:
             gs = self.models[class_name].get_gaussians(cam)
@@ -765,6 +886,7 @@ class BasicTrainer(nn.Module):
             _quats=gs_dict["_quats"],
             _rgbs=gs_dict["_rgbs"],
             _opacities=gs_dict["_opacities"],
+            _shs=gs_dict["_shs"],
             detach_keys=[],
             extras=None
         )
