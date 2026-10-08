@@ -66,6 +66,7 @@ This codebase provides support for popular driving datasets. We offer instructio
 | ArgoVerse | [Data Process Instruction](docs/ArgoVerse.md) | 7 cameras | 10Hz | ✅ |
 | PandaSet | [Data Process Instruction](docs/Pandaset.md) | 6 cameras | 10Hz | ✅ |
 | KITTI | [Data Process Instruction](docs/KITTI.md) | 2 cameras | 10Hz | ✅ |
+| UrbanV2X | [Data Process Instruction](docs/UrbanV2X.md) | 7 cameras | 10Hz | ❌ |
 
 *NOTE: For NuScenes data, LiDAR operates at 20Hz and cameras at 12Hz, but keyframes (with object annotations) are only at 2Hz. We provide a method to interpolate annotations up to 10Hz.
 

@@ -181,4 +181,41 @@ DATASETS_CONFIG = {
             "egocar_visible": False
         },
     },
+    "urbanv2x": {
+        0: {
+            "camera_name": "CAM_RR",
+            "original_size": (870, 1100),
+            "egocar_visible": False
+        },
+        1: {
+            "camera_name": "CAM_F1",
+            "original_size": (870, 1100),
+            "egocar_visible": True
+        },
+        2: {
+            "camera_name": "CAM_F",
+            "original_size": (870, 1100),
+            "egocar_visible": True
+        },
+        3: {
+            "camera_name": "CAM_FL",
+            "original_size": (870, 1100),
+            "egocar_visible": False
+        },
+        4: {
+            "camera_name": "CAM_FR",
+            "original_size": (870, 1100),
+            "egocar_visible": False
+        },
+        5: {
+            "camera_name": "CAM_RL",
+            "original_size": (870, 1100),
+            "egocar_visible": False
+        },
+        6: {
+            "camera_name": "CAM_R",
+            "original_size": (870, 1100),
+            "egocar_visible": True
+        },
+    },
 }

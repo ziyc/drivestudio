@@ -34,6 +34,8 @@ def get_layout(dataset_type: str):
         layout = layout_kitti
     elif dataset_type == "nuplan":
         layout = layout_nuplan
+    elif dataset_type == "urbanv2x":
+        layout = layout_urbanv2x
     else:
         raise ValueError(f"dataset_type {dataset_type} not supported")
     return layout
@@ -495,3 +497,21 @@ depth_visualizer = lambda frame, opacity: visualize_depth(
     hi=120,
     depth_curve_fn=lambda x: -np.log(x + 1e-6),
 )
+
+def layout_urbanv2x(
+    imgs: List[np.array], cam_names: List[str]
+) -> np.array:
+    """UrbanV2X: front row CAM_FL | CAM_F | CAM_FR, back row CAM_RL | CAM_R | CAM_RR (CAM_F1 drawn in CAM_F's slot
+    only if CAM_F is absent). Unused slots are cropped away, so a single camera gives just that image."""
+    slots = {"CAM_FL": (0, 0), "CAM_F": (0, 1), "CAM_FR": (0, 2), "CAM_RL": (1, 0), "CAM_R": (1, 1), "CAM_RR": (1, 2)}
+    if "CAM_F" not in cam_names: slots["CAM_F1"] = (0, 1)
+    h, w, ch = imgs[0].shape
+    tiled_img = np.zeros((2 * h, 3 * w, ch), dtype=np.float32)
+    filled_mask = np.zeros((2 * h, 3 * w), dtype=np.uint8)
+    for img, name in zip(imgs, cam_names):
+        if name not in slots: continue
+        r, c = slots[name]
+        tiled_img[r * h:r * h + img.shape[0], c * w:c * w + img.shape[1]] = img
+        filled_mask[r * h:r * h + img.shape[0], c * w:c * w + img.shape[1]] = 1
+    ys, xs = np.where(filled_mask)
+    return tiled_img[ys.min():ys.max() + 1, xs.min():xs.max() + 1]

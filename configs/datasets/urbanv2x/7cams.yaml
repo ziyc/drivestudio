@@ -1,0 +1,44 @@
+# UrbanV2X dataset configuration (7 cameras)
+# Processed cameras (undistorted, 0.5x scale by default; ids = hikcamera index):
+#   idx  camera   original size  note
+#    0   CAM_RR   (870, 1100)    rear-right
+#    1   CAM_F1   (870, 1100)    front, stereo partner of CAM_F (~0.3 m); ego hood visible
+#    2   CAM_F    (870, 1100)    front; ego hood visible
+#    3   CAM_FL   (870, 1100)    front-left
+#    4   CAM_FR   (870, 1100)    front-right
+#    5   CAM_RL   (870, 1100)    rear-left
+#    6   CAM_R    (870, 1100)    rear; ego hood visible
+# Ego-hood pixels are masked in training (data/ego_masks/urbanv2x/<cam>.png) and, with
+# trainer.render.exclude_egocar_in_metrics, also excluded from the evaluation metrics.
+
+data:
+  data_root: data/urbanv2x/processed # data root for the dataset
+  dataset: urbanv2x # dataset type
+  scene_idx: hkstp_2a_20s # scene folder name (see data/urbanv2x_example_scenes.txt)
+  start_timestep: 0 # which timestep to start from
+  end_timestep: -1 # which timestep to end at, -1 means the last timestep
+  preload_device: cpu # choose from ["cpu", "cuda"]; cpu keeps ~3 GB of images off a 16 GB GPU
+  pixel_source: # image source and object annotations
+    type: datasets.urbanv2x.urbanv2x_sourceloader.UrbanV2XPixelSource
+    cameras: [0, 1, 2, 3, 4, 5, 6] # which cameras to use
+    downscale_when_loading: [1, 1, 1, 1, 1, 1, 1] # the size of the images to load
+    downscale: 1 # downscale factor wrt to the downscale_when_loading
+    undistort: False # images are undistorted during preprocessing
+    test_image_stride: 10 # use every Nth timestep for the test set. if 0, use all images for training and none for testing
+    load_sky_mask: True # whether to load sky mask
+    load_dynamic_mask: True # semantic vehicle/human masks, used for the dynamic-region metrics
+    load_objects: False # no 3D box annotations are provided
+    load_smpl: False # no human body poses are provided
+    sampler: # error based image sampler
+      buffer_downscale: 8 # downscale factor for the buffer wrt load_size
+      buffer_ratio: 0.5 # the percentage of images sampled according to the error buffer
+      start_enhance_weight: 3 # give more chance to sample starting frames, which usually have more errors
+  lidar_source: # everything related to "lidar" --- from lidar points
+    type: datasets.urbanv2x.urbanv2x_sourceloader.UrbanV2XLiDARSource
+    load_lidar: True # Velodyne HDL-32E, deskewed to each camera timestamp
+    lidar_downsample_factor: 4 # downsample lidar by this factor to compute percentile
+    lidar_percentile: 0.02  # percentile to compute aabb from lidar
+
+trainer:
+  render:
+    exclude_egocar_in_metrics: True # ego hood is never supervised; do not score it

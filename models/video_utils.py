@@ -229,15 +229,33 @@ def render(
                 lidar_on_images.append(lidar_on_image)
 
             if compute_metrics:
-                psnr = compute_psnr(rgb, image_infos["pixels"])
-                ssim_score = ssim(
-                    get_numpy(rgb),
-                    get_numpy(image_infos["pixels"]),
-                    data_range=1.0,
-                    channel_axis=-1,
-                )
+                # optionally exclude ego-car pixels (never supervised) from all metrics, enabled per dataset with
+                # trainer.render.exclude_egocar_in_metrics (default off, so existing benchmarks are unchanged):
+                # PSNR/SSIM average over valid pixels only; LPIPS sees GT pasted into the ego region
+                valid = None
+                if trainer.render_cfg.get("exclude_egocar_in_metrics", False) and image_infos.get("egocar_masks") is not None:
+                    valid = ~get_numpy(image_infos["egocar_masks"]).astype(bool)
+                rgb_eval = rgb if valid is None else torch.where(
+                    torch.from_numpy(valid).to(rgb.device)[..., None], rgb, image_infos["pixels"])
+                psnr = compute_psnr(rgb, image_infos["pixels"]) if valid is None else \
+                    compute_psnr(rgb[valid], image_infos["pixels"][valid])
+                if valid is None:   # original behaviour
+                    ssim_score = ssim(
+                        get_numpy(rgb),
+                        get_numpy(image_infos["pixels"]),
+                        data_range=1.0,
+                        channel_axis=-1,
+                    )
+                else:
+                    ssim_score = ssim(
+                        get_numpy(rgb_eval),
+                        get_numpy(image_infos["pixels"]),
+                        data_range=1.0,
+                        channel_axis=-1,
+                        full=True,
+                    )[1][valid].mean()
                 lpips = trainer.lpips(
-                    rgb[None, ...].permute(0, 3, 1, 2),
+                    rgb_eval[None, ...].permute(0, 3, 1, 2),
                     image_infos["pixels"][None, ...].permute(0, 3, 1, 2)
                 )
                 logger.info(f"Frame {i}: PSNR {psnr:.4f}, SSIM {ssim_score:.4f}")
@@ -247,6 +265,8 @@ def render(
                 
                 if "sky_masks" in image_infos:
                     occupied_mask = ~get_numpy(image_infos["sky_masks"]).astype(bool)
+                    if valid is not None:
+                        occupied_mask &= valid
                     if occupied_mask.sum() > 0:
                         occupied_psnrs.append(
                             compute_psnr(

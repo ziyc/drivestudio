@@ -13,6 +13,7 @@ if __name__ == "__main__":
     - KITTI
     - NUPlan
     - PandaSet
+    - UrbanV2X (see docs/UrbanV2X.md)
 
     Usage:
     ------
@@ -244,8 +245,20 @@ if __name__ == "__main__":
             process_id_list=scene_ids_list,
             workers=args.workers,
         )
+    elif args.dataset == "urbanv2x":
+        from datasets.urbanv2x.urbanv2x_preprocess import UrbanV2XProcessor
+
+        # scenes are listed in --split_file as "<scene> <bag> <gt_file>"; --scene_ids are line indices
+        dataset_processor = UrbanV2XProcessor(
+            load_dir=args.data_root,
+            save_dir=args.target_dir,
+            scene_file=args.split_file,
+            process_keys=args.process_keys,
+            process_id_list=args.scene_ids,
+            workers=args.workers,
+        )
     else:
-        raise ValueError(f"Unknown dataset {args.dataset}, please choose from waymo, pandaset, argoverse, nuscenes, kitti, nuplan")
+        raise ValueError(f"Unknown dataset {args.dataset}, please choose from waymo, pandaset, argoverse, nuscenes, kitti, nuplan, urbanv2x")
 
     if args.scene_ids is not None and args.workers == 1:
         for scene_id in args.scene_ids:

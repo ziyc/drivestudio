@@ -1,0 +1,4 @@
+# UrbanV2X scenes: <scene_name> <bag (in <data_root>/bags)> <GNSS/INS file (in <data_root>/gt)>
+# scene id = line index among non-comment lines (used by datasets/preprocess.py --scene_ids)
+hkstp_2a_20s merged_main_lidar_2a_cut_1786608350.692470_1786608370.692470.bag honda_pm_2_100hz.txt
+hkstp_2b_20s merged_main_lidar_2b_cut_1786608565_1786608585.bag honda_pm_2_100hz.txt
