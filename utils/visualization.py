@@ -34,6 +34,8 @@ def get_layout(dataset_type: str):
         layout = layout_kitti
     elif dataset_type == "nuplan":
         layout = layout_nuplan
+    elif dataset_type == "physicalai":
+        layout = layout_physicalai
     else:
         raise ValueError(f"dataset_type {dataset_type} not supported")
     return layout
@@ -339,6 +341,69 @@ def layout_argoverse(
     min_x, max_x = np.where(filled_mask)[1].min(), np.where(filled_mask)[1].max()
     tiled_img = tiled_img[min_y:max_y, min_x:max_x]
     return tiled_img
+
+def layout_physicalai(
+    imgs: List[np.array], cam_names: List[str]
+) -> np.array:
+    """Combine cameras into a tiled image.
+    Layout:
+
+        ##############################################
+        #######   front_wide  #  front_tele    #######
+        ##############################################
+        #  cross_left  #              #  cross_right #
+        ##############################################
+        #  rear_left   #  rear_tele   #  rear_right  #
+        ##############################################
+
+    Images are resized to a common width while preserving their aspect ratios.
+    Unselected camera slots are left blank, then empty outer borders are cropped.
+    """
+    camera_positions = {
+        "front_wide": (0, 0.5),
+        "front_tele": (0, 1.5),
+        "cross_left": (1, 0),
+        "cross_right": (1, 2),
+        "rear_left": (2, 0),
+        "rear_tele": (2, 1),
+        "rear_right": (2, 2),
+    }
+    selected_imgs = [
+        imgs[idx] for idx, cam_name in enumerate(cam_names)
+        if cam_name in camera_positions
+    ]
+    if not selected_imgs:
+        raise ValueError("No PhysicalAI cameras found in cam_names")
+
+    channel = selected_imgs[0].shape[-1]
+    tile_width = max(img.shape[1] for img in selected_imgs)
+    tile_height = max(
+        round(img.shape[0] * tile_width / img.shape[1]) for img in selected_imgs
+    )
+    height = 3 * tile_height
+    width = 3 * tile_width
+    tiled_img = np.zeros((height, width, channel), dtype=np.float32)
+    filled_mask = np.zeros((height, width), dtype=np.uint8)
+
+    for idx, cam_name in enumerate(cam_names):
+        if cam_name not in camera_positions:
+            continue
+        img = imgs[idx]
+        img_height = round(img.shape[0] * tile_width / img.shape[1])
+        img = cv2.resize(img, (tile_width, img_height))
+        row, col = camera_positions[cam_name]
+        row_start = row * tile_height + (tile_height - img_height) // 2
+        col_start = int(col * tile_width)
+        row_end = row_start + img_height
+        col_end = col_start + tile_width
+        tiled_img[row_start:row_end, col_start:col_end] = img
+        filled_mask[row_start:row_end, col_start:col_end] = 1
+
+    # crop the image according to the largest filled area
+    filled_y, filled_x = np.where(filled_mask)
+    min_y, max_y = filled_y.min(), filled_y.max() + 1
+    min_x, max_x = filled_x.min(), filled_x.max() + 1
+    return tiled_img[min_y:max_y, min_x:max_x]
 
 def dump_3d_bbox_on_image(
     coords, img,

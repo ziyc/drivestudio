@@ -107,8 +107,10 @@ if __name__ == "__main__":
         from datasets.kitti.kitti_human_utils import project_human_boxes, CAMERA_LIST
     elif args.dataset == "nuplan":
         from datasets.nuplan.nuplan_human_utils import project_human_boxes, CAMERA_LIST
+    elif args.dataset == "physicalai":
+        from datasets.physicalai.physicalai_human_utils import project_human_boxes, CAMERA_LIST
     else:
-        raise ValueError(f"Unknown dataset {args.dataset}, please choose from waymo, pandaset, argoverse, nuscenes, kitti, nuplan")
+        raise ValueError(f"Unknown dataset {args.dataset}, please choose from waymo, pandaset, argoverse, nuscenes, kitti, nuplan, physicalai")
     
     if args.scene_ids is not None:
         scene_ids_list = args.scene_ids
@@ -119,8 +121,8 @@ if __name__ == "__main__":
             # Waymo, Pandaset, Argoverse, NuScenes
             scene_ids_list = [int(line.strip().split(",")[0]) for line in split_file]
         except:
-            # KITTI
-            scene_ids_list = [line.strip().split(" ")[0] for line in split_file]
+            # KITTI, PhysicalAI
+            scene_ids_list = [line.strip().split(",")[0].split(" ")[0] for line in split_file]
     else:
         scene_ids_list = np.arange(args.start_idx, args.start_idx + args.num_scenes)
     

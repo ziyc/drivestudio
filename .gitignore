@@ -13,6 +13,7 @@ data/argoverse
 data/nuscenes
 data/kitti
 data/nuplan
+data/physicalai
 vscode_debugs
 debug/
 .vscode

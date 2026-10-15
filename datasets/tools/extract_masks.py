@@ -106,7 +106,7 @@ if __name__ == "__main__":
         # parse the split file
         split_file = open(args.split_file, "r").readlines()[1:]
         # NOTE: small hack here, to be refined in the futher (TODO)
-        if "kitti" in args.split_file or "nuplan" in args.split_file:
+        if "kitti" in args.split_file or "nuplan" in args.split_file or "physicalai" in args.split_file:
             scene_ids_list = [line.strip().split(",")[0] for line in split_file]
         else:
             scene_ids_list = [int(line.strip().split(",")[0]) for line in split_file]

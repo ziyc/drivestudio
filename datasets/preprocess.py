@@ -8,11 +8,12 @@ if __name__ == "__main__":
 
     This script facilitates the preprocessing of datasets:
     - Waymo
+    - PandaSet
     - Argoverse
     - NuScenes
     - KITTI
-    - NUPlan
-    - PandaSet
+    - NuPlan
+    - PhysicalAI
 
     Usage:
     ------
@@ -244,8 +245,18 @@ if __name__ == "__main__":
             process_id_list=scene_ids_list,
             workers=args.workers,
         )
+    elif args.dataset == "physicalai":
+        from datasets.physicalai.physicalai_preprocess import PhysicalAIProcessor
+
+        dataset_processor = PhysicalAIProcessor(
+            load_dir=args.data_root,
+            save_dir=args.target_dir,
+            process_keys=args.process_keys,
+            process_id_list=scene_ids_list,
+            workers=args.workers,
+        )
     else:
-        raise ValueError(f"Unknown dataset {args.dataset}, please choose from waymo, pandaset, argoverse, nuscenes, kitti, nuplan")
+        raise ValueError(f"Unknown dataset {args.dataset}, please choose from waymo, pandaset, argoverse, nuscenes, kitti, nuplan, physicalai")
 
     if args.scene_ids is not None and args.workers == 1:
         for scene_id in args.scene_ids:

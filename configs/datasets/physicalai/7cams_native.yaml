@@ -1,0 +1,41 @@
+# PhysicalAI dataset configuration
+# Processed cameras:
+#   idx    camera       nominal FOV
+#    0    front_wide     120 degrees
+#    1    front_tele      30 degrees
+#    2    cross_left     120 degrees
+#    3    cross_right    120 degrees
+#    4    rear_left       70 degrees
+#    5    rear_right      70 degrees
+#    6    rear_tele       30 degrees
+# Original image sizes are read from each processed scene's metadata.json.
+# NCore V4 images retain their native projection.
+# Set undistort below to False for native training or True for rectification.
+
+data:
+  data_root: data/physicalai/processed # data root for the dataset
+  dataset: physicalai # dataset type
+  scene_idx: 0 # which scene to use
+  start_timestep: 0 # which timestep to start from
+  end_timestep: -1 # which timestep to end at, -1 means the last timestep
+  preload_device: cpu # choose from ["cpu", "cuda"], cache the data on this device
+  pixel_source: # image source and object annotations
+    type: datasets.physicalai.physicalai_sourceloader.PhysicalAIPixelSource
+    cameras: [0, 1, 2, 3, 4, 5, 6] # which cameras to use
+    downscale_when_loading: [2, 2, 2, 2, 2, 2, 2] # the size of the images to load
+    downscale: 1 # downscale factor wrt to the downscale_when_loading
+    undistort: False # whether to undistort the images
+    test_image_stride: 5 # use every Nth timestep for the test set. if 0, use all images for training and none for testing
+    load_sky_mask: True # whether to load sky mask
+    load_dynamic_mask: True # whether to load dynamic mask
+    load_objects: True # whether to load object bounding boxes
+    load_smpl: False # whether to load SMPL template for pedestrians; enable after the optional humanpose stage
+    sampler: # error based image sampler
+      buffer_downscale: 4 # downscale factor for the buffer wrt load_size
+      buffer_ratio: 0.0 # the percentage of images sampled according to the error buffer
+      start_enhance_weight: 1 # give more chance to sample starting frames, which usually have more errors
+  lidar_source: # everything related to "lidar" --- from lidar points
+    type: datasets.physicalai.physicalai_sourceloader.PhysicalAILiDARSource
+    load_lidar: True # whether to load lidar
+    lidar_downsample_factor: 4 # downsample lidar by this factor to compute percentile
+    lidar_percentile: 0.02 # percentile to compute aabb from lidar

@@ -13,7 +13,6 @@ from utils.misc import import_str
 from models.trainers import BasicTrainer
 from models.video_utils import (
     render_images,
-    save_videos,
     render_novel_views
 )
 
@@ -33,6 +32,19 @@ def do_evaluation(
 ):
     trainer.set_eval()
 
+    def video_kwargs(name: str, num_timestamps: int, fps: int):
+        postfix = "" if args.render_video_postfix is None else f"_{args.render_video_postfix}"
+        return {
+            "save_pth": f"{cfg.log_dir}/videos{post_fix}/{name}_{step}{postfix}.mp4",
+            "layout": dataset.layout,
+            "num_timestamps": num_timestamps,
+            "keys": render_keys,
+            "num_cams": dataset.pixel_source.num_cams,
+            "save_seperate_video": cfg.logging.save_seperate_video,
+            "fps": fps,
+            "verbose": True,
+        }
+
     logger.info("Evaluating Pixels...")
     if dataset.test_image_set is not None and cfg.render.render_test:
         logger.info("Evaluating Test Set Pixels...")
@@ -41,7 +53,9 @@ def do_evaluation(
             dataset=dataset.test_image_set,
             compute_metrics=True,
             compute_error_map=cfg.render.vis_error,
+            save_video_kwargs=video_kwargs("test_set", dataset.num_test_timesteps, 2),
         )
+        vis_frame_dict = render_results.pop("vis_frame_dict")
         
         if log_metrics:
             eval_dict = {}
@@ -67,24 +81,6 @@ def do_evaluation(
                 json.dump(eval_dict, f)
             logger.info(f"Image evaluation metrics saved to {test_metrics_file}")
 
-        if args.render_video_postfix is None:
-            video_output_pth = f"{cfg.log_dir}/videos{post_fix}/test_set_{step}.mp4"
-        else:
-            video_output_pth = (
-                f"{cfg.log_dir}/videos{post_fix}/test_set_{step}_{args.render_video_postfix}.mp4"
-            )
-        vis_frame_dict = save_videos(
-            render_results,
-            video_output_pth,
-            layout=dataset.layout,
-            num_timestamps=dataset.num_test_timesteps,
-            keys=render_keys,
-            num_cams=dataset.pixel_source.num_cams,
-            save_seperate_video=cfg.logging.save_seperate_video,
-            fps=2,
-            verbose=True,
-            save_images=False,
-        )
         if args.enable_wandb:
             for k, v in vis_frame_dict.items():
                 wandb.log({"image_rendering/test/" + k: wandb.Image(v)})
@@ -98,7 +94,9 @@ def do_evaluation(
             dataset=dataset.full_image_set,
             compute_metrics=True,
             compute_error_map=cfg.render.vis_error,
+            save_video_kwargs=video_kwargs("full_set", dataset.num_img_timesteps, cfg.render.fps),
         )
+        vis_frame_dict = render_results.pop("vis_frame_dict")
         
         if log_metrics:
             eval_dict = {}
@@ -124,23 +122,6 @@ def do_evaluation(
                 json.dump(eval_dict, f)
             logger.info(f"Image evaluation metrics saved to {full_metrics_file}")
 
-        if args.render_video_postfix is None:
-            video_output_pth = f"{cfg.log_dir}/videos{post_fix}/full_set_{step}.mp4"
-        else:
-            video_output_pth = (
-                f"{cfg.log_dir}/videos{post_fix}/full_set_{step}_{args.render_video_postfix}.mp4"
-            )
-        vis_frame_dict = save_videos(
-            render_results,
-            video_output_pth,
-            layout=dataset.layout,
-            num_timestamps=dataset.num_img_timesteps,
-            keys=render_keys,
-            num_cams=dataset.pixel_source.num_cams,
-            save_seperate_video=cfg.logging.save_seperate_video,
-            fps=cfg.render.fps,
-            verbose=True,
-        )
         if args.enable_wandb:
             for k, v in vis_frame_dict.items():
                 wandb.log({"image_rendering/full/" + k: wandb.Image(v)})
@@ -148,6 +129,7 @@ def do_evaluation(
         torch.cuda.empty_cache()
     
     render_novel_cfg = cfg.render.get("render_novel", None)
+    render_traj = None
     if render_novel_cfg is not None:
         logger.info("Rendering novel views...")
         render_traj = dataset.get_novel_render_traj(
@@ -160,7 +142,21 @@ def do_evaluation(
         
         for traj_type, traj in render_traj.items():
             # Prepare rendering data
-            render_data = dataset.prepare_novel_view_render_data(traj)
+            camera_options = {
+                key: render_novel_cfg[key]
+                for key in (
+                    "camera_model",
+                    "camera_id",
+                    "height",
+                    "width",
+                    "fov",
+                    "radial_coeffs",
+                    "ftheta_parameters",
+                    "render_mode",
+                )
+                if key in render_novel_cfg
+            }
+            render_data = dataset.prepare_novel_view_render_data(traj, **camera_options)
             
             # Render and save video
             save_path = os.path.join(video_output_dir, f"{traj_type}.mp4")
@@ -168,7 +164,137 @@ def do_evaluation(
                 trainer, render_data, save_path,
                 fps=render_novel_cfg.get("fps", cfg.render.fps)
             )
+            del render_data
+            torch.cuda.empty_cache()
             logger.info(f"Saved novel view video for trajectory type: {traj_type} to {save_path}")
+
+    trainer_render_mode = trainer.render_cfg.get("render_mode", "default")
+    explicit_fisheye_cfg = cfg.render.get("render_fisheye", None)
+    render_fisheye_cfg = (
+        explicit_fisheye_cfg
+        if explicit_fisheye_cfg is not None
+        else (
+            render_novel_cfg
+            if render_novel_cfg is not None and "camera_model" not in render_novel_cfg
+            else None
+        )
+    )
+    fisheye_render_mode = (
+        render_fisheye_cfg.get("render_mode", trainer_render_mode)
+        if render_fisheye_cfg is not None and render_fisheye_cfg is not False
+        else None
+    )
+    if (
+        explicit_fisheye_cfg is not None
+        and explicit_fisheye_cfg is not False
+        and fisheye_render_mode != "geer"
+    ):
+        raise ValueError(
+            "render.render_fisheye.render_mode must be 'geer' "
+            f"(or trainer.render.render_mode must be geer); got "
+            f"{fisheye_render_mode!r}"
+        )
+    if (
+        fisheye_render_mode == "geer"
+        and render_fisheye_cfg is not None
+        and render_fisheye_cfg is not False
+    ):
+        logger.info("Rendering fisheye views with %s...", fisheye_render_mode)
+        base_traj_cfg = (
+            render_novel_cfg
+            if render_novel_cfg is not None
+            else render_fisheye_cfg
+        )
+        fisheye_traj_types = render_fisheye_cfg.get(
+            "traj_types",
+            base_traj_cfg.get("traj_types", ["front_center_interp"]),
+        )
+        fisheye_frames = render_fisheye_cfg.get(
+            "frames",
+            base_traj_cfg.get("frames", dataset.frame_num),
+        )
+        base_traj_types = base_traj_cfg.get(
+            "traj_types", ["front_center_interp"]
+        )
+        base_frames = base_traj_cfg.get("frames", dataset.frame_num)
+        if (
+            render_traj is None
+            or list(fisheye_traj_types) != list(base_traj_types)
+            or fisheye_frames != base_frames
+        ):
+            render_traj = dataset.get_novel_render_traj(
+                traj_types=fisheye_traj_types,
+                target_frames=fisheye_frames,
+            )
+
+        video_output_dir = f"{cfg.log_dir}/videos{post_fix}/fisheye_{step}"
+        os.makedirs(video_output_dir, exist_ok=True)
+        for traj_type, traj in render_traj.items():
+            render_data = dataset.prepare_fisheye_view_render_data(
+                traj,
+                camera_id=render_fisheye_cfg.get("camera_id", None),
+                height=render_fisheye_cfg.get("height", None),
+                width=render_fisheye_cfg.get("width", None),
+                fov=render_fisheye_cfg.get("fov", 180.0),
+                radial_coeffs=render_fisheye_cfg.get("radial_coeffs", None),
+                render_mode=fisheye_render_mode,
+            )
+            save_path = os.path.join(video_output_dir, f"{traj_type}.mp4")
+            render_novel_views(
+                trainer,
+                render_data,
+                save_path,
+                fps=render_fisheye_cfg.get(
+                    "fps", base_traj_cfg.get("fps", cfg.render.fps)
+                ),
+            )
+            del render_data
+            torch.cuda.empty_cache()
+            logger.info(
+                "Saved fisheye view video for trajectory type %s to %s",
+                traj_type,
+                save_path,
+            )
+
+    render_ftheta_cfg = cfg.render.get("render_ftheta", None)
+    if render_ftheta_cfg is not None and render_ftheta_cfg is not False:
+        ftheta_render_mode = render_ftheta_cfg.get(
+            "render_mode", trainer.render_cfg.get("render_mode", "default")
+        )
+        if ftheta_render_mode != "geer":
+            raise ValueError("FTheta rendering requires render_mode 'geer'")
+        if any(render_ftheta_cfg.get(key) is not None for key in ("fov", "radial_coeffs")):
+            raise ValueError("FTheta rendering uses ftheta_parameters, not fov or radial_coeffs")
+        logger.info("Rendering FTheta views with %s...", ftheta_render_mode)
+        base_traj_cfg = render_novel_cfg if render_novel_cfg is not None else {}
+        render_traj = dataset.get_novel_render_traj(
+            traj_types=render_ftheta_cfg.get(
+                "traj_types", base_traj_cfg.get("traj_types", ["front_center_interp"])
+            ),
+            target_frames=render_ftheta_cfg.get(
+                "frames", base_traj_cfg.get("frames", dataset.frame_num)
+            ),
+        )
+        video_output_dir = f"{cfg.log_dir}/videos{post_fix}/novel_ftheta_{step}"
+        os.makedirs(video_output_dir, exist_ok=True)
+        for traj_type, traj in render_traj.items():
+            render_data = dataset.prepare_novel_view_render_data(
+                traj,
+                camera_model="ftheta",
+                camera_id=render_ftheta_cfg.get("camera_id", None),
+                height=render_ftheta_cfg.get("height", None),
+                width=render_ftheta_cfg.get("width", None),
+                ftheta_parameters=render_ftheta_cfg.get("ftheta_parameters", None),
+                render_mode=ftheta_render_mode,
+            )
+            save_path = os.path.join(video_output_dir, f"{traj_type}.mp4")
+            render_novel_views(
+                trainer, render_data, save_path,
+                fps=render_ftheta_cfg.get("fps", base_traj_cfg.get("fps", cfg.render.fps)),
+            )
+            del render_data
+            torch.cuda.empty_cache()
+            logger.info(f"Saved FTheta view video for trajectory type: {traj_type} to {save_path}")
             
 def main(args):
     log_dir = os.path.dirname(args.resume_from)
@@ -229,6 +355,8 @@ def main(args):
     if cfg.render.vis_error:
         render_keys.insert(render_keys.index("rgbs") + 1, "rgb_error_maps")
     
+    render_keys = cfg.render.get("keys", render_keys)
+
     if args.save_catted_videos:
         cfg.logging.save_seperate_video = False
     

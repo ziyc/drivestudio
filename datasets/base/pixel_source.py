@@ -1,8 +1,9 @@
-from typing import Dict, Tuple, List, Callable
+from typing import Dict, Tuple, List, Callable, Iterable
 from omegaconf import OmegaConf
 import os
 import abc
 import cv2
+import math
 import random
 import logging
 import numpy as np
@@ -74,6 +75,80 @@ def get_rays(
     viewdirs = directions / (direction_norm + 1e-8)
     return origins, viewdirs, direction_norm
 
+
+def get_fisheye_rays(
+    x: Tensor,
+    y: Tensor,
+    c2w: Tensor,
+    intrinsic: Tensor,
+    radial_coeffs: Tensor,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    """Generate rays for gsplat's OpenCV fisheye camera model.
+
+    The fisheye projection is ``theta_d = theta * (1 + k1*theta^2 + ... +
+    k4*theta^8)``.  We invert that polynomial here so view-dependent models
+    (most notably the sky model) use the same directions as the rasterizer.
+    """
+    if intrinsic.ndim == 2:
+        intrinsic = intrinsic[None]
+    if c2w.ndim == 2:
+        c2w = c2w[None]
+
+    coeffs = torch.as_tensor(
+        radial_coeffs, dtype=intrinsic.dtype, device=intrinsic.device
+    ).flatten()
+    if coeffs.numel() != 4:
+        raise ValueError(
+            f"Fisheye rendering requires four radial coefficients; got {coeffs.numel()}"
+        )
+
+    distorted = torch.stack(
+        [
+            (x - intrinsic[:, 0, 2] + 0.5) / intrinsic[:, 0, 0],
+            (y - intrinsic[:, 1, 2] + 0.5) / intrinsic[:, 1, 1],
+        ],
+        dim=-1,
+    )
+    theta_d = torch.linalg.norm(distorted, dim=-1)
+    theta = theta_d.clone()
+
+    # Newton iterations match OpenCV's fisheye inverse closely while keeping
+    # this helper device- and autograd-friendly.
+    for _ in range(10):
+        theta2 = theta.square()
+        theta4 = theta2.square()
+        theta6 = theta4 * theta2
+        theta8 = theta4.square()
+        distortion = (
+            1.0
+            + coeffs[0] * theta2
+            + coeffs[1] * theta4
+            + coeffs[2] * theta6
+            + coeffs[3] * theta8
+        )
+        derivative = (
+            1.0
+            + 3.0 * coeffs[0] * theta2
+            + 5.0 * coeffs[1] * theta4
+            + 7.0 * coeffs[2] * theta6
+            + 9.0 * coeffs[3] * theta8
+        )
+        theta = theta - (theta * distortion - theta_d) / derivative.clamp_min(1e-8)
+
+    scale = torch.where(
+        theta_d > 1e-8,
+        torch.sin(theta) / theta_d,
+        torch.ones_like(theta_d),
+    )
+    camera_dirs = torch.cat(
+        [distorted * scale[..., None], torch.cos(theta)[..., None]], dim=-1
+    )
+    directions = (camera_dirs[:, None, :] * c2w[:, :3, :3]).sum(dim=-1)
+    origins = torch.broadcast_to(c2w[:, :3, -1], directions.shape)
+    direction_norm = torch.linalg.norm(directions, dim=-1, keepdim=True)
+    viewdirs = directions / (direction_norm + 1e-8)
+    return origins, viewdirs, direction_norm
+
 def sparse_lidar_map_downsampler(lidar_depth_map, downscale_factor):
     # NOTE(ziyu): Important! 
     # This is the correct way to downsample the sparse lidar depth map.  
@@ -123,8 +198,9 @@ class CameraData(object):
         self.buffer_downscale = buffer_downscale
         self.device = device
         
-        self.cam_name = DATASETS_CONFIG[dataset_name][cam_id]["camera_name"]
-        self.original_size = DATASETS_CONFIG[dataset_name][cam_id]["original_size"]
+        metadata = getattr(self, "camera_metadata", None) or DATASETS_CONFIG[dataset_name][cam_id]
+        self.cam_name = metadata["camera_name"]
+        self.original_size = metadata["original_size"]
         self.load_size = [
             int(self.original_size[0] / downscale_when_loading),
             int(self.original_size[1] / downscale_when_loading),
@@ -1067,66 +1143,260 @@ class ScenePixelSource(abc.ABC):
         """
         return self.data_cfg.sampler.buffer_downscale
     
-    def prepare_novel_view_render_data(self, dataset_type: str, traj: torch.Tensor) -> list:
-        """
-        Prepare all necessary elements for novel view rendering.
+    def prepare_novel_view_render_data(
+        self,
+        dataset_type,
+        traj,
+        camera_model=None,
+        camera_id=None,
+        height=None,
+        width=None,
+        fov=None,
+        radial_coeffs=None,
+        ftheta_parameters=None,
+        render_mode=None,
+    ):
+        """Yield virtual-camera frames without materializing a full video in memory.
 
-        Args:
-            dataset_type (str): Type of dataset
-            traj (torch.Tensor): Novel view trajectory, shape (N, 4, 4)
-
-        Returns:
-            list: List of dicts, each containing elements required for rendering a single frame:
-                - cam_infos: Camera information (extrinsics, intrinsics, image dimensions)
-                - image_infos: Image-related information (indices, normalized time, viewdirs, etc.)
+        FTheta calibration may be a JSON path or a mapping. With no override,
+        use the selected dataset camera model/calibration. Virtual cameras use
+        one pose per image, as does recorded-camera evaluation.
         """
-        if dataset_type == "argoverse":
-            cam_id = 1  # Use cam_id 1 for Argoverse dataset
-        else:
-            cam_id = 0  # Use cam_id 0 for other datasets
-        
-        intrinsics = self.camera_data[cam_id].intrinsics[0]  # Assume intrinsics are constant across frames
-        H, W = self.camera_data[cam_id].HEIGHT, self.camera_data[cam_id].WIDTH
-        
-        original_frame_count = self.num_frames
-        scaled_indices = torch.linspace(0, original_frame_count - 1, len(traj))
-        normed_time = torch.linspace(0, 1, len(traj))
-        
-        render_data = []
-        for i in range(len(traj)):
-            c2w = traj[i]
-            
-            # Generate ray origins and directions
-            x, y = torch.meshgrid(torch.arange(W), torch.arange(H), indexing='xy')
-            x, y = x.to(self.device), y.to(self.device)
-            
-            origins, viewdirs, direction_norm = get_rays(x.flatten(), y.flatten(), c2w, intrinsics)
-            origins = origins.reshape(H, W, 3)
-            viewdirs = viewdirs.reshape(H, W, 3)
-            direction_norm = direction_norm.reshape(H, W, 1)
-            
-            cam_infos = {
-                "camera_to_world": c2w,
-                "intrinsics": intrinsics,
-                "height": torch.tensor([H], dtype=torch.long, device=self.device),
-                "width": torch.tensor([W], dtype=torch.long, device=self.device),
+        import json
+        from utils.geometry import camera_model_rays, scale_ftheta_calibration
+
+        if camera_id is None:
+            if dataset_type == 'argoverse':
+                camera_id = 1
+            else:
+                camera_id = self.camera_list[0]
+        source = self.camera_data[camera_id]
+        H, W = int(height or source.HEIGHT), int(width or source.WIDTH)
+        if H <= 0 or W <= 0:
+            raise ValueError('Virtual camera dimensions must be positive')
+        source_model = getattr(source, 'camera_model', 'pinhole')
+        model = camera_model or source_model
+        if model not in ('pinhole', 'fisheye', 'ftheta'):
+            raise ValueError('camera_model must be pinhole, fisheye or ftheta')
+        K = source.intrinsics[0].to(self.device).clone()
+        K[0] *= W / source.WIDTH
+        K[1] *= H / source.HEIGHT
+        radial = None
+        params = None
+        if model == 'ftheta':
+            params = ftheta_parameters
+            if isinstance(params, str):
+                with open(params) as stream:
+                    params = json.load(stream)
+            if params is None:
+                params = getattr(source, 'ftheta_parameters', None)
+            if params is None:
+                raise ValueError(
+                    'FTheta virtual rendering requires ftheta_parameters (JSON path or calibration mapping)'
+                )
+            if fov is not None:
+                raise ValueError('FTheta uses its calibration, not a separate fov override')
+            params = scale_ftheta_calibration(params, W, H)
+            K = torch.eye(3, device=self.device)
+            K[:2, 2] = K.new_tensor(params['principal_point']) + 0.5
+        elif model == 'fisheye':
+            radial = K.new_tensor(radial_coeffs if radial_coeffs is not None else [0.0] * 4)
+            if radial.shape != (4,) or not torch.isfinite(radial).all():
+                raise ValueError('OpenCV fisheye requires four finite radial_coeffs')
+            fov = 180.0 if fov is None else float(fov)
+            if not 0 < fov <= 180:
+                raise ValueError('OpenCV fisheye fov must be in (0, 180] degrees')
+            angle = np.radians(fov) / 2
+            radius = angle * (
+                1 + sum(float(k) * angle ** (2 * i + 2) for i, k in enumerate(radial))
+            )
+            if radius <= 0:
+                raise ValueError('Fisheye calibration produces a nonpositive image radius')
+            K[0, 0] = K[1, 1] = W / (2 * radius)
+            K[:2, 2] = K.new_tensor([W / 2, H / 2])
+        elif fov is not None or source_model != 'pinhole':
+            fov = 90.0 if fov is None else float(fov)
+            if not 0 < fov < 180:
+                raise ValueError('Pinhole fov must be in (0, 180) degrees')
+            K[0, 0] = K[1, 1] = W / (2 * np.tan(np.radians(fov) / 2))
+            K[:2, 2] = K.new_tensor([W / 2, H / 2])
+        rays, valid = camera_model_rays(H, W, K, model, radial, params)
+        y, x = torch.meshgrid(
+            torch.arange(H, device=self.device), torch.arange(W, device=self.device), indexing='ij'
+        )
+        for i, pose in enumerate(traj):
+            pose = pose.to(self.device)
+            time = i / max(len(traj) - 1, 1)
+            yield {
+                'cam_infos': {
+                    'camera_to_world': pose,
+                    'intrinsics': K,
+                    'height': H,
+                    'width': W,
+                    'camera_model': model,
+                    'radial_coeffs': radial,
+                    'ftheta_parameters': params,
+                    'render_mode': render_mode,
+                },
+                'image_infos': {
+                    'origins': pose[:3, 3].expand(H, W, 3),
+                    'viewdirs': rays @ pose[:3, :3].T,
+                    'direction_norm': torch.ones_like(rays[..., :1]),
+                    'img_idx': torch.full(
+                        (H, W),
+                        round(time * (self.num_frames - 1)) * self.num_cams
+                        + int(source.unique_cam_idx),
+                        dtype=torch.long,
+                        device=self.device,
+                    ),
+                    'frame_idx': torch.full(
+                        (H, W),
+                        round(time * (self.num_frames - 1)),
+                        dtype=torch.long,
+                        device=self.device,
+                    ),
+                    'normed_time': torch.full((H, W), time, device=self.device),
+                    'pixel_coords': torch.stack((y / H, x / W), -1),
+                    'egocar_masks': (~valid).float(),
+                },
             }
             
-            image_infos = {
-                "origins": origins,
-                "viewdirs": viewdirs,
-                "direction_norm": direction_norm,
-                "img_idx": torch.full((H, W), i, dtype=torch.long, device=self.device),
-                "frame_idx": torch.full((H, W), scaled_indices[i].round().long(), device=self.device),
-                "normed_time": torch.full((H, W), normed_time[i], dtype=torch.float32, device=self.device),
-                "pixel_coords": torch.stack(
-                    [y.float() / H, x.float() / W], dim=-1
-                ),  # [H, W, 2]
-            }
-            
-            render_data.append({
-                "cam_infos": cam_infos,
-                "image_infos": image_infos,
-            })
-        
-        return render_data
+
+    def prepare_fisheye_view_render_data(
+        self,
+        dataset_type: str,
+        traj: torch.Tensor,
+        camera_id: int = None,
+        height: int = None,
+        width: int = None,
+        fov: float = 180.0,
+        radial_coeffs: List[float] = None,
+        render_mode: str = None,
+    ) -> Iterable[Dict[str, Dict]]:
+        """Lazily prepare fisheye frames along a novel-view trajectory.
+
+        Ray maps are generated on CPU one frame at a time. A full trajectory
+        can otherwise retain several gigabytes of GPU tensors before video
+        rendering starts.
+        """
+        if render_mode != "geer":
+            raise ValueError(
+                "Fisheye rendering requires render_mode to be 'geer'; "
+                f"got {render_mode!r}"
+            )
+        if camera_id is None:
+            preferred_camera_id = 1 if dataset_type == "argoverse" else 0
+            camera_id = (
+                preferred_camera_id
+                if preferred_camera_id in self.camera_data
+                else self.camera_list[0]
+            )
+        if camera_id not in self.camera_data:
+            raise ValueError(
+                f"Camera {camera_id} is not loaded; available cameras: {self.camera_list}"
+            )
+        if not 0.0 < fov < 360.0:
+            raise ValueError(
+                f"Fisheye FOV must be between 0 and 360 degrees; got {fov}"
+            )
+
+        source_camera = self.camera_data[camera_id]
+        H = source_camera.HEIGHT if height is None else int(height)
+        W = source_camera.WIDTH if width is None else int(width)
+        dtype = source_camera.intrinsics.dtype
+
+        coefficient_values = (
+            [0.0, 0.0, 0.0, 0.0]
+            if radial_coeffs is None
+            else [float(value) for value in radial_coeffs]
+        )
+        if len(coefficient_values) != 4:
+            raise ValueError(
+                "render_fisheye.radial_coeffs must contain exactly four values"
+            )
+
+        # Map theta=fov/2 to the edge of the shorter image dimension. Account
+        # for the configured OpenCV fisheye polynomial so fov retains the same
+        # meaning when non-zero distortion coefficients are used.
+        edge_theta = math.radians(fov) / 2.0
+        edge_theta2 = edge_theta * edge_theta
+        distorted_edge_radius = edge_theta * (
+            1.0
+            + coefficient_values[0] * edge_theta2
+            + coefficient_values[1] * edge_theta2**2
+            + coefficient_values[2] * edge_theta2**3
+            + coefficient_values[3] * edge_theta2**4
+        )
+        if (
+            not math.isfinite(distorted_edge_radius)
+            or distorted_edge_radius <= 0
+        ):
+            raise ValueError(
+                "render_fisheye.radial_coeffs produce a non-positive radius "
+                f"at half of the configured FOV ({fov / 2.0} degrees)"
+            )
+        focal = (min(H, W) / 2.0) / distorted_edge_radius
+        intrinsics = torch.tensor(
+            [
+                [focal, 0.0, W / 2.0],
+                [0.0, focal, H / 2.0],
+                [0.0, 0.0, 1.0],
+            ],
+            dtype=dtype,
+            device="cpu",
+        )
+        radial_coeffs = torch.as_tensor(
+            coefficient_values,
+            dtype=dtype,
+            device="cpu",
+        )
+
+        traj = traj.detach().cpu()
+        scaled_indices = torch.linspace(
+            0, self.num_frames - 1, len(traj), device="cpu"
+        )
+        normed_time = torch.linspace(0, 1, len(traj), device="cpu")
+        unique_img_idx = source_camera.unique_img_idx.detach().cpu()
+        x, y = torch.meshgrid(
+            torch.arange(W, device="cpu"),
+            torch.arange(H, device="cpu"),
+            indexing="xy",
+        )
+        x_flat, y_flat = x.flatten(), y.flatten()
+        pixel_coords = torch.stack(
+            [y.float() / H, x.float() / W], dim=-1
+        )
+
+        def frame_generator():
+            for i, c2w in enumerate(traj):
+                source_frame = int(scaled_indices[i].round().item())
+                source_image_id = int(unique_img_idx[source_frame].item())
+                _, viewdirs, _ = get_fisheye_rays(
+                    x_flat, y_flat, c2w, intrinsics, radial_coeffs
+                )
+                yield {
+                    "cam_infos": {
+                        "camera_to_world": c2w,
+                        "intrinsics": intrinsics,
+                        "height": torch.tensor(H, dtype=torch.long),
+                        "width": torch.tensor(W, dtype=torch.long),
+                        "camera_model": "fisheye",
+                        "radial_coeffs": radial_coeffs,
+                        "render_mode": render_mode,
+                    },
+                    "image_infos": {
+                        "viewdirs": viewdirs.reshape(H, W, 3),
+                        "img_idx": torch.full(
+                            (H, W), source_image_id, dtype=torch.long
+                        ),
+                        "frame_idx": torch.full(
+                            (H, W), source_frame, dtype=torch.long
+                        ),
+                        "normed_time": torch.full(
+                            (H, W), normed_time[i], dtype=torch.float32
+                        ),
+                        "pixel_coords": pixel_coords,
+                    },
+                }
+
+        return frame_generator()

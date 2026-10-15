@@ -559,6 +559,10 @@ class DrivingDataset(SceneDataset):
         # project lidar points to the image plane
         for cam in self.pixel_source.camera_data.values():
             for frame_idx in range(len(cam)):
+                if hasattr(cam, "project_points"):
+                    _, _, visible = cam.project_points(pts_xyz, frame_idx)
+                    valid_mask |= visible
+                    continue
                 intrinsic_4x4 = torch.nn.functional.pad(
                     cam.intrinsics[frame_idx], (0, 1, 0, 1)
                 )
@@ -645,36 +649,39 @@ class DrivingDataset(SceneDataset):
                     + lidar_infos["lidar_viewdirs"] * lidar_infos["lidar_ranges"]
                 )
                 
-                # project lidar points to the image plane
-                if cam.undistort:
-                    new_camera_matrix, _ = cv2.getOptimalNewCameraMatrix(
-                                cam.intrinsics[frame_idx].cpu().numpy(),
-                                cam.distortions[frame_idx].cpu().numpy(),
-                                (cam.WIDTH, cam.HEIGHT),
-                                alpha=1,
-                            )
-                    intrinsic_4x4 = torch.nn.functional.pad(
+                if hasattr(cam, "project_points"):
+                    cam_points, depth, valid_mask = cam.project_points(lidar_points, frame_idx)
+                else:
+                    # project lidar points to the image plane
+                    if cam.undistort:
+                        new_camera_matrix, _ = cv2.getOptimalNewCameraMatrix(
+                            cam.intrinsics[frame_idx].cpu().numpy(),
+                            cam.distortions[frame_idx].cpu().numpy(),
+                            (cam.WIDTH, cam.HEIGHT),
+                            alpha=1,
+                        )
+                        intrinsic_4x4 = torch.nn.functional.pad(
                             torch.from_numpy(new_camera_matrix), (0, 1, 0, 1)
                         ).to(self.device)
-                else:
-                    intrinsic_4x4 = torch.nn.functional.pad(
-                        cam.intrinsics[frame_idx], (0, 1, 0, 1)
-                    )
-                intrinsic_4x4[3, 3] = 1.0
-                lidar2img = intrinsic_4x4 @ cam.cam_to_worlds[frame_idx].inverse()
-                lidar_points = (
-                    lidar2img[:3, :3] @ lidar_points.T + lidar2img[:3, 3:4]
-                ).T # (num_pts, 3)
-                
-                depth = lidar_points[:, 2]
-                cam_points = lidar_points[:, :2] / (depth.unsqueeze(-1) + 1e-6) # (num_pts, 2)
-                valid_mask = (
-                    (cam_points[:, 0] >= 0)
-                    & (cam_points[:, 0] < cam.WIDTH)
-                    & (cam_points[:, 1] >= 0)
-                    & (cam_points[:, 1] < cam.HEIGHT)
-                    & (depth > 0)
-                ) # (num_pts, )
+                    else:
+                        intrinsic_4x4 = torch.nn.functional.pad(
+                            cam.intrinsics[frame_idx], (0, 1, 0, 1)
+                        )
+                    intrinsic_4x4[3, 3] = 1.0
+                    lidar2img = intrinsic_4x4 @ cam.cam_to_worlds[frame_idx].inverse()
+                    lidar_points = (
+                        lidar2img[:3, :3] @ lidar_points.T + lidar2img[:3, 3:4]
+                    ).T  # (num_pts, 3)
+
+                    depth = lidar_points[:, 2]
+                    cam_points = lidar_points[:, :2] / (depth.unsqueeze(-1) + 1e-6)  # (num_pts, 2)
+                    valid_mask = (
+                        (cam_points[:, 0] >= 0)
+                        & (cam_points[:, 0] < cam.WIDTH)
+                        & (cam_points[:, 1] >= 0)
+                        & (cam_points[:, 1] < cam.HEIGHT)
+                        & (depth > 0)
+                    )  # (num_pts, )
                 depth = depth[valid_mask]
                 _cam_points = cam_points[valid_mask]
                 depth_map = torch.zeros(
@@ -742,17 +749,23 @@ class DrivingDataset(SceneDataset):
         
         return novel_trajs
 
-    def prepare_novel_view_render_data(self, traj: torch.Tensor) -> list:
-            """
-            Prepare all necessary elements for novel view rendering.
+    def prepare_novel_view_render_data(self, traj: torch.Tensor, **kwargs) -> list:
+        """
+        Prepare all necessary elements for novel view rendering.
 
-            Args:
-                traj (torch.Tensor): Novel view trajectory, shape (N, 4, 4)
+        Args:
+            traj (torch.Tensor): Novel view trajectory, shape (N, 4, 4)
 
-            Returns:
-                list: List of dicts, each containing elements required for rendering a single frame:
-                    - cam_infos: Camera information (extrinsics, intrinsics, image dimensions)
-                    - image_infos: Image-related information (indices, normalized time, viewdirs, etc.)
-            """
-            # Call the PixelSource's method
-            return self.pixel_source.prepare_novel_view_render_data(self.type, traj)
+        Returns:
+            list: List of dicts, each containing elements required for rendering a single frame:
+                - cam_infos: Camera information (extrinsics, intrinsics, image dimensions)
+                - image_infos: Image-related information (indices, normalized time, viewdirs, etc.)
+        """
+        # Call the PixelSource's method
+        return self.pixel_source.prepare_novel_view_render_data(self.type, traj, **kwargs)
+
+    def prepare_fisheye_view_render_data(self, traj: torch.Tensor, **kwargs) -> list:
+        """Prepare fisheye camera data along a novel-view trajectory."""
+        return self.pixel_source.prepare_fisheye_view_render_data(
+            self.type, traj, **kwargs
+        )

@@ -81,6 +81,7 @@ class BasicTrainer(nn.Module):
         self.optim_general = optim
         self.losses_dict = losses
         self.render_cfg = render
+        self._init_renderer()
         self.res_schedule = res_schedule
         self.model_config = model_config
         self.num_iters = self.optim_general.get("num_iters", 30000)
@@ -228,6 +229,10 @@ class BasicTrainer(nn.Module):
         self.grad_scaler = torch.cuda.amp.GradScaler(enabled=self.optim_general.get("use_grad_scaler", False))
     
     def _init_losses(self) -> None:
+        self.use_depth_supervision = (
+            self.losses_dict.get("depth") is not None
+            or self.losses_dict.get("inverse_depth_smoothness") is not None
+        )
         sky_opacity_loss_fn = None
         if "Sky" in self.models:
             if self.losses_dict.mask.opacity_loss_type == "bce":
@@ -278,12 +283,18 @@ class BasicTrainer(nn.Module):
         
     def postprocess_per_train_step(self, step: int) -> None:
         radii = self.info["radii"]
-        if self.render_cfg.absgrad:
-            grads = self.info["means2d"].absgrad.clone()
-        else:
-            grads = self.info["means2d"].grad.clone()
-        grads[..., 0] *= self.info["width"] / 2.0 * self.render_cfg.batch_size
-        grads[..., 1] *= self.info["height"] / 2.0 * self.render_cfg.batch_size
+        if radii.ndim == 3:
+            radii = radii.amax(dim=-1)
+        if self.render_cfg.get("render_mode", "default") == "default":
+            if self.render_cfg.absgrad:
+                grads = self.info["means2d"].absgrad.clone()
+            else:
+                grads = self.info["means2d"].grad.clone()
+            grads[..., 0] *= self.info["width"] / 2.0 * self.render_cfg.batch_size
+            grads[..., 1] *= self.info["height"] / 2.0 * self.render_cfg.batch_size
+        elif self.render_cfg.get("render_mode", "default") == "geer":
+            # GEER already accumulates absolute contributions and applies distance scaling.
+            grads = self.info["geer_gradient"].grad.clone()
         
         for class_name in self.gaussian_classes.keys():
             gaussian_mask = self.pts_labels == self.gaussian_classes[class_name]
@@ -310,9 +321,12 @@ class BasicTrainer(nn.Module):
             self.viewer.update(step, num_train_rays_per_step)
     
     def update_visibility_filter(self) -> None:
+        radii = self.info["radii"]
+        if radii.ndim == 3:
+            radii = radii.amax(dim=-1)
         for class_name in self.gaussian_classes.keys():
             gaussian_mask = self.pts_labels == self.gaussian_classes[class_name]
-            self.models[class_name].cur_radii = self.info["radii"][0, gaussian_mask]
+            self.models[class_name].cur_radii = radii[0, gaussian_mask]
 
     def process_camera(
         self,
@@ -333,8 +347,13 @@ class BasicTrainer(nn.Module):
             camtoworlds=camtoworlds,
             camtoworlds_gt=camtoworlds_gt,
             Ks=camera_infos["intrinsics"],
-            H=camera_infos["height"],
-            W=camera_infos["width"]
+            H=int(camera_infos["height"]),
+            W=int(camera_infos["width"]),
+            camera_model=camera_infos.get("camera_model", "pinhole"),
+            radial_coeffs=camera_infos.get("radial_coeffs"),
+            tangential_coeffs=camera_infos.get("tangential_coeffs"),
+            ftheta_parameters=camera_infos.get("ftheta_parameters"),
+            render_mode=camera_infos.get("render_mode"),
         )
         
         return camera_dict
@@ -382,21 +401,96 @@ class BasicTrainer(nn.Module):
         
         return gaussians
     
+    def _init_renderer(self):
+        """Inspect the installed rasterizer once, before rendering any frames."""
+        import inspect
+
+        self._rasterization_parameters = set(inspect.signature(rasterization).parameters)
+        self._geer_supports_ftheta = False
+        if 'with_geer' in self._rasterization_parameters:
+            try:
+                from gsplat.geer.camera import get_camera_tanfov
+            except ImportError:
+                return
+            self._geer_supports_ftheta = (
+                'ftheta_coeffs' in inspect.signature(get_camera_tanfov).parameters
+            )
+
+    def camera_rasterization_kwargs(self, cam, mode):
+        """Build rasterizer arguments for this camera and render mode."""
+        if mode not in ('default', 'geer'):
+            raise ValueError('render_mode must be default or geer')
+        parameters = self._rasterization_parameters
+        extra = {}
+        if mode == 'geer':
+            if self.render_cfg.packed:
+                raise ValueError('DriveStudio GEER training requires packed=false')
+            extra.update(with_geer=True, with_eval3d=True)
+        if cam.camera_model != 'pinhole' and mode == 'default':
+            raise ValueError('Native fisheye/FTheta cameras require GEER')
+        if cam.camera_model not in ('pinhole', 'fisheye', 'ftheta'):
+            raise ValueError('Unsupported camera model: ' + cam.camera_model)
+        if cam.camera_model != 'pinhole' or 'camera_model' in parameters:
+            extra['camera_model'] = cam.camera_model
+        if cam.radial_coeffs is not None:
+            extra['radial_coeffs'] = cam.radial_coeffs[None]
+        if cam.tangential_coeffs is not None:
+            extra['tangential_coeffs'] = cam.tangential_coeffs[None]
+        if cam.camera_model == 'ftheta':
+            if mode == 'geer' and not self._geer_supports_ftheta:
+                raise RuntimeError(
+                    'GEER needs native FTheta culling support; install the compatible renderer described in docs/PhysicalAI.md'
+                )
+            if 'ftheta_coeffs' not in parameters:
+                raise RuntimeError('Installed gsplat lacks FTheta support; see docs/PhysicalAI.md')
+            from gsplat.cuda._wrapper import FThetaCameraDistortionParameters, FThetaPolynomialType
+
+            p = cam.ftheta_parameters
+            if p is None or list(p['resolution']) != [int(cam.W), int(cam.H)]:
+                raise ValueError('FTheta calibration must match the rendered image resolution')
+            extra['ftheta_coeffs'] = FThetaCameraDistortionParameters(
+                reference_poly=FThetaPolynomialType[str(p['reference_poly'])],
+                pixeldist_to_angle_poly=tuple(float(v) for v in p['pixeldist_to_angle_poly']),
+                angle_to_pixeldist_poly=tuple(float(v) for v in p['angle_to_pixeldist_poly']),
+                max_angle=float(p['max_angle']),
+                linear_cde=tuple(float(v) for v in p['linear_cde']),
+            )
+        missing = set(extra) - set(parameters)
+        if missing:
+            raise RuntimeError(
+                f'Installed gsplat lacks {sorted(missing)} for {mode}; see docs/PhysicalAI.md'
+            )
+        if self.render_cfg.get('tile_size') is not None:
+            extra['tile_size'] = int(self.render_cfg.tile_size)
+        return extra
+
     def render_gaussians(
         self,
         gs: dataclass_gs,
         cam: dataclass_camera,
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
+        render_mode = cam.render_mode or self.render_cfg.get("render_mode", "default")
+        camera_kwargs = self.camera_rasterization_kwargs(cam, render_mode)
+        viewmat = torch.linalg.inv(cam.camtoworlds)
+        colors = gs.rgbs
+        native_depth = render_mode != "default" and self.use_depth_supervision
+        if render_mode != "default":
+            kwargs["render_mode"] = "RGB"
+        if native_depth:
+            # Carry camera Z as a feature to keep depth supervision differentiable.
+            camera_depth = gs.means @ viewmat[2, :3] + viewmat[2, 3]
+            colors = torch.cat((colors, camera_depth[:, None]), dim=-1)
     
         def render_fn(opaticy_mask=None, return_info=False):
             renders, alphas, info = rasterization(
                 means=gs.means,
                 quats=gs.quats,
                 scales=gs.scales,
-                opacities=gs.opacities.squeeze()*opaticy_mask if opaticy_mask is not None else gs.opacities.squeeze(),
-                colors=gs.rgbs,
-                viewmats=torch.linalg.inv(cam.camtoworlds)[None, ...],  # [C, 4, 4]
+                opacities=gs.opacities.squeeze() *
+                opaticy_mask if opaticy_mask is not None else gs.opacities.squeeze(),
+                colors=colors,
+                viewmats=viewmat[None, ...],  # [C, 4, 4]
                 Ks=cam.Ks[None, ...],  # [C, 3, 3]
                 width=cam.W,
                 height=cam.H,
@@ -404,14 +498,22 @@ class BasicTrainer(nn.Module):
                 absgrad=self.render_cfg.absgrad,
                 sparse_grad=self.render_cfg.sparse_grad,
                 rasterize_mode="antialiased" if self.render_cfg.antialiased else "classic",
+                **camera_kwargs,
                 **kwargs,
             )
             renders = renders[0]
             alphas = alphas[0].squeeze(-1)
             assert self.render_cfg.batch_size == 1, "batch size must be 1, will support batch size > 1 in the future"
             
-            assert renders.shape[-1] == 4, f"Must render rgb, depth and alpha"
-            rendered_rgb, rendered_depth = torch.split(renders, [3, 1], dim=-1)
+            if native_depth:
+                rendered_rgb, rendered_depth = torch.split(renders, [3, 1], dim=-1)
+                rendered_depth = rendered_depth / alphas[..., None].clamp_min(1e-8)
+            elif renders.shape[-1] == 4:
+                rendered_rgb, rendered_depth = torch.split(renders, [3, 1], dim=-1)
+            elif renders.shape[-1] == 3:
+                rendered_rgb, rendered_depth = renders, None
+            else:
+                raise RuntimeError("Unexpected rasterizer output channels")
             
             if not return_info:
                 return torch.clamp(rendered_rgb, max=1.0), rendered_depth, alphas[..., None]
@@ -422,12 +524,21 @@ class BasicTrainer(nn.Module):
         rgb, depth, opacity, self.info = render_fn(return_info=True)
         results = {
             "rgb_gaussians": rgb,
-            "depth": depth, 
             "opacity": opacity
         }
+
+        if depth is not None:
+            results["depth"] = depth
         
         if self.training:
-            self.info["means2d"].retain_grad()
+            if render_mode == "default":
+                self.info["means2d"].retain_grad()
+            elif render_mode == "geer":
+                if self.info.get("geer_gradient") is None:
+                    raise RuntimeError(
+                        "GEER training requires gsplat with geer_gradient support"
+                    )
+                self.info["geer_gradient"].retain_grad()
         
         return results, render_fn
 

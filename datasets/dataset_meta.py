@@ -181,4 +181,42 @@ DATASETS_CONFIG = {
             "egocar_visible": False
         },
     },
+    # PhysicalAI demo rig defaults; the loader uses each scene's sizes and ego masks.
+    "physicalai": {
+        0: {
+            "camera_name": "front_wide",
+            "original_size": (1080, 1920),
+            "egocar_visible": True
+        },
+        1: {
+            "camera_name": "front_tele",
+            "original_size": (1080, 1920),
+            "egocar_visible": False
+        },
+        2: {
+            "camera_name": "cross_left",
+            "original_size": (1080, 1920),
+            "egocar_visible": True
+        },
+        3: {
+            "camera_name": "cross_right",
+            "original_size": (1080, 1920),
+            "egocar_visible": True
+        },
+        4: {
+            "camera_name": "rear_left",
+            "original_size": (1080, 1920),
+            "egocar_visible": True
+        },
+        5: {
+            "camera_name": "rear_right",
+            "original_size": (1080, 1920),
+            "egocar_visible": True
+        },
+        6: {
+            "camera_name": "rear_tele",
+            "original_size": (1080, 1920),
+            "egocar_visible": False
+        },
+    },
 }

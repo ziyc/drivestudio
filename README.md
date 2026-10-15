@@ -24,7 +24,7 @@ A 3DGS framework for omni urban scene reconstruction and simulation!
 </p>
 
 ## About
-DriveStudio is a 3DGS codebase for urban scene reconstruction/simulation. It offers a system with multiple Gaussian representations to jointly reconstruct backgrounds, vehicles, and non-rigid categories (pedestrians, cyclists, etc.) from driving logs. DriveStudio also provides a unified data system supporting various popular driving datasets, including [Waymo](https://waymo.com/open/), [PandaSet](https://pandaset.org/), [Argoverse2](https://www.argoverse.org/av2.html), [KITTI](http://www.cvlibs.net/datasets/kitti/), [NuScenes](https://www.nuscenes.org/), and [NuPlan](https://www.nuscenes.org/nuplan).
+DriveStudio is a 3DGS codebase for urban scene reconstruction/simulation. It offers a system with multiple Gaussian representations to jointly reconstruct backgrounds, vehicles, and non-rigid categories (pedestrians, cyclists, etc.) from driving logs. DriveStudio also provides a unified data system supporting various popular driving datasets, including [Waymo](https://waymo.com/open/), [PandaSet](https://pandaset.org/), [Argoverse2](https://www.argoverse.org/av2.html), [KITTI](http://www.cvlibs.net/datasets/kitti/), [NuScenes](https://www.nuscenes.org/), [NuPlan](https://www.nuscenes.org/nuplan), and [PhysicalAI NCore](docs/PhysicalAI.md).
 
 This codebase also contains the **official implementation** of:
   > **OmniRe: Omni Urban Scene Reconstruction** <br> ICLR 2025 (Spotlight) <br> [Project Page](https://ziyc.github.io/omnire/) | [Paper](https://arxiv.org/abs/2408.16760) <br> [Ziyu Chen](https://ziyc.github.io/), [Jiawei Yang](https://jiawei-yang.github.io/), [Jiahui Huang](https://huangjh-pub.github.io/), [Riccardo de Lutio](https://riccardodelutio.github.io/), [Janick Martinez Esturo](https://www.jme.pub/), [Boris Ivanovic](https://www.borisivanovic.com/), [Or Litany](https://orlitany.github.io/), [Zan Gojcic](https://zgojcic.github.io/), [Sanja Fidler](https://www.cs.utoronto.ca/~fidler/), [Marco Pavone](https://stanford.edu/~pavone/), [Li Song](https://medialab.sjtu.edu.cn/author/li-song/), [Yue Wang](https://yuewang.xyz/)
@@ -52,6 +52,7 @@ Our codebase supports two types of Gaussian trainers:
 | [Deformable-GS](https://github.com/ingra14m/Deformable-3D-Gaussians) | Unofficial | Single | • Deformable Gaussians: Entire scene |
 | [PVG](https://github.com/fudan-zvg/PVG) | Unofficial | Single | • Periodic Vibration Gaussians: Entire scene |
 | [Street Gaussians](https://github.com/zju3dv/street_gaussians) | Unofficial | Multi | • Static Gaussians: Background, Vehicles |
+| [3DGEER](https://github.com/boschresearch/3dgeer) | Unofficial | Single/Multi | • Ray-Based Gaussians: Can be integrated with any other representation (see [here](./configs/3dgeer.md) for details) |
 
 We extend our gratitude to the authors for their remarkable contributions. If you find these works useful, please consider citing them.
 
@@ -66,6 +67,7 @@ This codebase provides support for popular driving datasets. We offer instructio
 | ArgoVerse | [Data Process Instruction](docs/ArgoVerse.md) | 7 cameras | 10Hz | ✅ |
 | PandaSet | [Data Process Instruction](docs/Pandaset.md) | 6 cameras | 10Hz | ✅ |
 | KITTI | [Data Process Instruction](docs/KITTI.md) | 2 cameras | 10Hz | ✅ |
+| PhysicalAI NCore | [Data Process Instruction](docs/PhysicalAI.md) | 7 cameras | ~10Hz (processed) | ✅ |
 
 *NOTE: For NuScenes data, LiDAR operates at 20Hz and cameras at 12Hz, but keyframes (with object annotations) are only at 2Hz. We provide a method to interpolate annotations up to 10Hz.
 
@@ -129,6 +131,7 @@ We support most popular public driving datasets. Detailed instructions for downl
 - ArgoVerse: [Data Process Instruction](docs/ArgoVerse.md)
 - PandaSet: [Data Process Instruction](docs/Pandaset.md)
 - KITTI: [Data Process Instruction](docs/KITTI.md)
+- PhysicalAI NCore: [Data Process Instruction](docs/PhysicalAI.md)
 
 ## 🚀 Running
 ### Training
@@ -152,6 +155,7 @@ python tools/train.py \
 - Specify dataset and number of cameras by setting `dataset`. Examples: `waymo/1cams`, `waymo/5cams`, `pandaset/6cams`, `argoverse/7cams`, etc.
   You can set up arbitrary camera combinations for each dataset. See `configs/datasets/` for custom configuration details.
 - For over 3 cameras or 450+ images, we recommend using `omnire_extended_cam.yaml`. It works better in practice.
+- For PhysicalAI, use `dataset=physicalai/7cams`. Native FTheta training uses GEER with `data.pixel_source.undistort: False` in the dataset config; set it to `True` for pinhole rectification. See the [3DGEER guide](configs/3dgeer.md) for setup.
 ### Evaluation
 ```shell
 python tools/eval.py --resume_from $ckpt_path

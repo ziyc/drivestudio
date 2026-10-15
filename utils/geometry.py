@@ -102,3 +102,185 @@ def rotation_6d_to_matrix(d6: Tensor) -> Tensor:
     b2 = F.normalize(b2, dim=-1)
     b3 = torch.cross(b1, b2, dim=-1)
     return torch.stack((b1, b2, b3), dim=-2)
+
+
+def scale_ftheta_calibration(parameters, width, height, fit=False, scale=None):
+    """Resize NCore calibration; stored principal points use integer pixel centers."""
+    if parameters['reference_poly'] not in ('PIXELDIST_TO_ANGLE', 'ANGLE_TO_PIXELDIST'):
+        raise ValueError('Unknown FTheta reference polynomial')
+    for key, count in (
+        ('resolution', 2),
+        ('principal_point', 2),
+        ('linear_cde', 3),
+        ('pixeldist_to_angle_poly', 6),
+        ('angle_to_pixeldist_poly', 6),
+    ):
+        values = np.asarray(parameters[key], dtype=np.float64)
+        if values.shape != (count,) or not np.isfinite(values).all():
+            raise ValueError('Invalid FTheta calibration: ' + key)
+    if min(parameters['resolution']) <= 0 or not 0 < float(parameters['max_angle']) < np.pi:
+        raise ValueError('Invalid FTheta resolution or max_angle')
+    sx, sy = width / parameters['resolution'][0], height / parameters['resolution'][1]
+    # interpolate(scale_factor=...) rounds output sizes without changing the pixel scale.
+    if scale is not None:
+        sx = sy = float(scale)
+    offset = [0.0, 0.0]
+    if fit:
+        sx = sy = min(sx, sy)
+        offset = [
+            (width - parameters["resolution"][0] * sx) / 2,
+            (height - parameters["resolution"][1] * sx) / 2,
+        ]
+    if sx <= 0 or not np.isclose(sx, sy, rtol=1e-5):
+        raise ValueError('FTheta requires positive, isotropic image scaling')
+    p = dict(parameters)
+    p['resolution'] = [int(width), int(height)]
+    p['principal_point'] = [
+        (float(v) + 0.5) * sx - 0.5 + offset[i] for i, v in enumerate(p['principal_point'])
+    ]
+    p['pixeldist_to_angle_poly'] = [
+        float(v) / sx**i for i, v in enumerate(p['pixeldist_to_angle_poly'])
+    ]
+    p['angle_to_pixeldist_poly'] = [float(v) * sx for v in p['angle_to_pixeldist_poly']]
+    return p
+
+
+def _camera_polynomial(coefficients, x):
+    y = torch.zeros_like(x)
+    for c in reversed(coefficients):
+        y = y * x + float(c)
+    return y
+
+
+def _invert_camera_polynomial(coefficients, target, initial):
+    derivative = [i * float(c) for i, c in enumerate(coefficients)][1:]
+    value = initial.clone()
+    for _ in range(12):
+        slope = _camera_polynomial(derivative, value)
+        safe = torch.where(slope.abs() > 1e-10, slope, torch.ones_like(slope))
+        value = value - (_camera_polynomial(coefficients, value) - target) / safe
+    valid = torch.isfinite(value) & (
+        (_camera_polynomial(coefficients, value) - target).abs() < 1e-4 * (1 + target.abs())
+    )
+    return value, valid
+
+
+def project_camera_model(
+    points, intrinsics, camera_model='pinhole', radial_coeffs=None, ftheta_parameters=None
+):
+    """Project camera-space points to pixel-center coordinates, with validity."""
+    r = torch.linalg.vector_norm(points[..., :2], dim=-1)
+    theta = torch.atan2(r, points[..., 2])
+    valid = torch.isfinite(points).all(-1) & (points.norm(dim=-1) > 1e-8)
+    if camera_model == 'pinhole':
+        xy = points[..., :2] / points[..., 2:].clamp_min(1e-8)
+        pixels = xy * intrinsics.diagonal()[:2] + intrinsics[:2, 2]
+        return pixels, valid & (points[..., 2] > 0)
+    if camera_model == 'fisheye':
+        coefficients = [0.0, 1.0]
+        for k in (radial_coeffs if radial_coeffs is not None else [0.0] * 4):
+            coefficients.extend([0.0, float(k)])
+        radius = _camera_polynomial(coefficients, theta)
+        xy = points[..., :2] * (radius / r.clamp_min(1e-8))[..., None]
+        pixels = xy * intrinsics.diagonal()[:2] + intrinsics[:2, 2]
+        return pixels, valid & (theta < np.pi / 2)
+    if camera_model != 'ftheta' or ftheta_parameters is None:
+        raise ValueError('Expected pinhole, fisheye, or ftheta with calibration')
+    p = ftheta_parameters
+    radius = _camera_polynomial(p['angle_to_pixeldist_poly'], theta)
+    if p['reference_poly'] == 'PIXELDIST_TO_ANGLE':
+        radius, converged = _invert_camera_polynomial(p['pixeldist_to_angle_poly'], theta, radius)
+        valid &= converged
+    elif p['reference_poly'] != 'ANGLE_TO_PIXELDIST':
+        raise ValueError('Unknown FTheta reference polynomial')
+    xy = points[..., :2] * (radius / r.clamp_min(1e-8))[..., None]
+    c, d, e = [float(v) for v in p['linear_cde']]
+    pixels = torch.stack((c * xy[..., 0] + d * xy[..., 1], e * xy[..., 0] + xy[..., 1]), -1)
+    pixels += points.new_tensor(p['principal_point']) + 0.5
+    valid &= (theta <= float(p['max_angle'])) & (radius >= 0) & torch.isfinite(pixels).all(-1)
+    return pixels, valid
+
+
+def camera_model_rays(
+    height, width, intrinsics, camera_model='pinhole', radial_coeffs=None, ftheta_parameters=None
+):
+    """Unit camera rays and valid pixels. Pixel centers are (x + .5, y + .5)."""
+    y, x = torch.meshgrid(
+        torch.arange(height, device=intrinsics.device, dtype=intrinsics.dtype) + 0.5,
+        torch.arange(width, device=intrinsics.device, dtype=intrinsics.dtype) + 0.5,
+        indexing='ij',
+    )
+    pixels = torch.stack((x, y), -1)
+    valid = torch.ones((height, width), dtype=torch.bool, device=intrinsics.device)
+    if camera_model == 'pinhole':
+        xy = (pixels - intrinsics[:2, 2]) / intrinsics.diagonal()[:2]
+        return F.normalize(torch.cat((xy, torch.ones_like(x[..., None])), -1), dim=-1), valid
+    if camera_model == 'fisheye':
+        xy = (pixels - intrinsics[:2, 2]) / intrinsics.diagonal()[:2]
+        radius = xy.norm(dim=-1)
+        coefficients = [0.0, 1.0]
+        for k in (radial_coeffs if radial_coeffs is not None else [0.0] * 4):
+            coefficients.extend([0.0, float(k)])
+        theta, valid = _invert_camera_polynomial(coefficients, radius, radius)
+        valid &= (theta >= 0) & (theta < np.pi / 2)
+    elif camera_model == 'ftheta' and ftheta_parameters is not None:
+        p = ftheta_parameters
+        c, d, e = [float(v) for v in p['linear_cde']]
+        if abs(c - d * e) < 1e-10:
+            raise ValueError('Singular FTheta affine calibration')
+        offset = pixels - (intrinsics.new_tensor(p['principal_point']) + 0.5)
+        xy = torch.stack(
+            (offset[..., 0] - d * offset[..., 1], c * offset[..., 1] - e * offset[..., 0]), -1
+        ) / (c - d * e)
+        radius = xy.norm(dim=-1)
+        theta = _camera_polynomial(p['pixeldist_to_angle_poly'], radius)
+        if p['reference_poly'] == 'ANGLE_TO_PIXELDIST':
+            theta, valid = _invert_camera_polynomial(p['angle_to_pixeldist_poly'], radius, theta)
+        elif p['reference_poly'] != 'PIXELDIST_TO_ANGLE':
+            raise ValueError('Unknown FTheta reference polynomial')
+        valid &= (theta >= 0) & (theta <= float(p['max_angle']))
+    else:
+        raise ValueError('Expected pinhole, fisheye, or calibrated ftheta camera')
+    rays = torch.cat(
+        (xy * (torch.sin(theta) / radius.clamp_min(1e-8))[..., None], torch.cos(theta)[..., None]),
+        -1,
+    )
+    rays = torch.where((radius < 1e-8)[..., None], rays.new_tensor([0.0, 0.0, 1.0]), rays)
+    valid &= torch.isfinite(rays).all(-1)
+    return torch.nan_to_num(rays), valid
+
+
+def camera_midpoint_pose(start, end):
+    """One representative camera-to-world pose for a complete image."""
+    from scipy.spatial.transform import Rotation, Slerp
+
+    pose = np.eye(4)
+    pose[:3, :3] = Slerp([0.0, 1.0], Rotation.from_matrix(np.stack((start[:3, :3], end[:3, :3]))))(
+        0.5
+    ).as_matrix()
+    pose[:3, 3] = (start[:3, 3] + end[:3, 3]) * 0.5
+    return pose
+
+
+def project_world_camera(
+    points,
+    pose,
+    intrinsics,
+    width,
+    height,
+    camera_model='pinhole',
+    radial_coeffs=None,
+    ftheta_parameters=None,
+):
+    """Project world points using one camera pose for the whole image."""
+    local = (points - pose[:3, 3]) @ pose[:3, :3]
+    pixels, valid = project_camera_model(
+        local, intrinsics, camera_model, radial_coeffs, ftheta_parameters
+    )
+    valid &= (
+        (pixels[..., 0] >= 0)
+        & (pixels[..., 0] < width)
+        & (pixels[..., 1] >= 0)
+        & (pixels[..., 1] < height)
+    )
+    return pixels, local[..., 2], valid

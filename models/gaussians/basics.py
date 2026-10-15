@@ -7,12 +7,14 @@ from numpy.typing import NDArray
 from typing import Dict, List, Optional, Union
 from dataclasses import dataclass, fields
 from sklearn.neighbors import NearestNeighbors
-from pytorch3d.transforms import matrix_to_quaternion
+from pytorch3d.transforms import matrix_to_quaternion, quaternion_to_matrix
 
 from gsplat.rendering import rasterization
-from gsplat.cuda_legacy._wrapper import num_sh_bases
-from gsplat.cuda_legacy._torch_impl import quat_to_rotmat
 from gsplat.cuda._wrapper import spherical_harmonics
+
+def quat_to_rotmat(quat):
+    assert quat.shape[-1] == 4, quat.shape
+    return quaternion_to_matrix(quat)
 
 def interpolate_quats(q1, q2, fraction=0.5):
     q1 = q1 / torch.norm(q1, dim=-1, keepdim=True)
@@ -88,6 +90,8 @@ def SH2RGB(sh):
     C0 = 0.28209479177387814
     return sh * C0 + 0.5
 
+def num_sh_bases(degree):
+    return (degree + 1) ** 2
 
 def projection_matrix(znear, zfar, fovx, fovy, device:Union[str,torch.device]="cpu"):
     """
@@ -116,6 +120,11 @@ class dataclass_camera:
     Ks: torch.Tensor
     H: int
     W: int
+    camera_model: str = "pinhole"
+    radial_coeffs: Optional[torch.Tensor] = None
+    tangential_coeffs: Optional[torch.Tensor] = None
+    ftheta_parameters: Optional[dict] = None
+    render_mode: Optional[str] = None
 
 @dataclass
 class dataclass_gs:
