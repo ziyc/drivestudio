@@ -585,7 +585,7 @@ class DrivingDataset(SceneDataset):
         if self.data_cfg.pixel_source.test_image_stride != 0:
             test_timesteps = np.arange(
                 # it makes no sense to have test timesteps before the start timestep
-                self.data_cfg.pixel_source.test_image_stride,
+                max(0,self.data_cfg.pixel_source.test_image_stride-1),
                 self.num_img_timesteps,
                 self.data_cfg.pixel_source.test_image_stride,
             )
